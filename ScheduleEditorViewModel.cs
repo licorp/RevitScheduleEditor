@@ -1,13 +1,14 @@
 using Autodesk.Revit.DB;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Linq;
 using System.Windows;
-using System.Windows.Input;
-using System.Windows.Data;
-using System.Collections;
 using System.Windows.Controls;
+using System.Windows.Data;
+using System.Windows.Input;
 
 namespace RevitScheduleEditor
 {
@@ -17,8 +18,7 @@ namespace RevitScheduleEditor
         private ViewSchedule _selectedSchedule;
         public ObservableCollection<ViewSchedule> Schedules { get; set; }
         public ObservableCollection<ScheduleRow> ScheduleData { get; set; }
-
-        // Filtering
+        
         private List<ScheduleRow> _allScheduleData;
         private string _searchText;
         public string SearchText
@@ -28,13 +28,11 @@ namespace RevitScheduleEditor
             {
                 _searchText = value;
                 OnPropertyChanged();
-                FilterScheduleData();
+                // Filter sẽ được handle bởi Window
             }
         }
 
-        // Autofill
         public ICommand AutofillCommand { get; }
-
         public ViewSchedule SelectedSchedule
         {
             get => _selectedSchedule;
@@ -42,11 +40,10 @@ namespace RevitScheduleEditor
             {
                 _selectedSchedule = value;
                 OnPropertyChanged();
-                LoadScheduleDataCommand.Execute(null);
+                LoadScheduleData(null);
             }
         }
-
-        public ICommand LoadScheduleDataCommand { get; }
+        
         public ICommand UpdateModelCommand { get; }
 
         public ScheduleEditorViewModel(Document doc)
@@ -55,11 +52,10 @@ namespace RevitScheduleEditor
             _allScheduleData = new List<ScheduleRow>();
             Schedules = new ObservableCollection<ViewSchedule>();
             ScheduleData = new ObservableCollection<ScheduleRow>();
-            LoadScheduleDataCommand = new RelayCommand(LoadScheduleData, CanLoadScheduleData);
+            
             UpdateModelCommand = new RelayCommand(UpdateModel, CanUpdateModel);
             AutofillCommand = new RelayCommand(ExecuteAutofill, CanExecuteAutofill);
-            // Enable filtering
-            CollectionViewSource.GetDefaultView(ScheduleData).Filter = FilterPredicate;
+
             LoadSchedules();
         }
 
@@ -78,55 +74,37 @@ namespace RevitScheduleEditor
             }
         }
 
-        private bool CanLoadScheduleData(object obj) => SelectedSchedule != null;
-
         private void LoadScheduleData(object obj)
         {
-            if (!CanLoadScheduleData(null)) return;
+            if (SelectedSchedule == null) return;
+
             _allScheduleData.Clear();
-            ScheduleData.Clear();
             var collector = new FilteredElementCollector(_doc, SelectedSchedule.Id).WhereElementIsNotElementType();
             var elements = collector.ToElements();
             var visibleFields = SelectedSchedule.Definition.GetFieldOrder()
                 .Select(id => SelectedSchedule.Definition.GetField(id))
                 .Where(f => !f.IsHidden).ToList();
+
             foreach (Element elem in elements)
             {
                 var scheduleRow = new ScheduleRow(elem);
                 foreach (var field in visibleFields)
                 {
                     Parameter param = GetParameterFromField(elem, field);
-                    string value = param?.AsValueString() ?? param?.AsString() ?? string.Empty;
+                    string value = param != null ? param.AsValueString() ?? param.AsString() ?? string.Empty : string.Empty;
                     scheduleRow.AddValue(field.GetName(), value);
                 }
                 _allScheduleData.Add(scheduleRow);
             }
+
+            ScheduleData.Clear();
             foreach (var row in _allScheduleData)
             {
                 ScheduleData.Add(row);
             }
-            FilterScheduleData();
-        }
-
-        private void FilterScheduleData()
-        {
-            CollectionViewSource.GetDefaultView(ScheduleData).Refresh();
-        }
-
-        private bool FilterPredicate(object item)
-        {
-            if (string.IsNullOrEmpty(SearchText))
-                return true;
-            if (item is ScheduleRow row)
-            {
-                // Kiểm tra tất cả các giá trị của row
-                foreach (var key in row.GetModifiedValues().Keys)
-                {
-                    if (row[key]?.ToLower().Contains(SearchText.ToLower()) ?? false)
-                        return true;
-                }
-            }
-            return false;
+            
+            // Notify that data has changed so UI can regenerate filters
+            OnPropertyChanged(nameof(ScheduleData));
         }
 
         private void ExecuteAutofill(object parameter)
@@ -164,8 +142,8 @@ namespace RevitScheduleEditor
             var firstColumn = cellInfos.First().Column;
             return cellInfos.All(c => c.Column == firstColumn);
         }
-        
-        private bool CanUpdateModel(object obj) => ScheduleData.Any(row => row.IsModified);
+
+        private bool CanUpdateModel(object obj) => _allScheduleData.Any(row => row.IsModified);
         
         private void UpdateModel(object obj)
         {
@@ -173,7 +151,8 @@ namespace RevitScheduleEditor
             {
                 trans.Start();
                 int updatedCount = 0;
-                var changedRows = ScheduleData.Where(row => row.IsModified).ToList();
+                var changedRows = _allScheduleData.Where(row => row.IsModified).ToList();
+                
                 foreach (var row in changedRows)
                 {
                     Element elem = row.GetElement();
@@ -185,13 +164,24 @@ namespace RevitScheduleEditor
                         {
                             try
                             {
-                                param.Set(modifiedPair.Value); // Nếu cần, có thể thêm xử lý kiểu dữ liệu
+                                switch (param.StorageType)
+                                {
+                                    case StorageType.Integer:
+                                        if (int.TryParse(modifiedPair.Value, out int intValue)) param.Set(intValue);
+                                        break;
+                                    case StorageType.Double:
+                                        // Dùng SetValueString để Revit tự xử lý đơn vị
+                                        param.SetValueString(modifiedPair.Value);
+                                        break;
+                                    case StorageType.String:
+                                        param.Set(modifiedPair.Value);
+                                        break;
+                                    case StorageType.ElementId:
+                                        // Xử lý cho tham số ElementId nếu cần
+                                        break;
+                                }
                                 updatedCount++;
-                            }
-                            catch (Exception ex)
-                            {
-                                // Logging...
-                            }
+                            } catch {}
                         }
                     }
                     row.AcceptChanges();
@@ -204,9 +194,9 @@ namespace RevitScheduleEditor
         private Parameter GetParameterFromField(Element elem, ScheduleField field)
         {
             if (elem == null || field == null) return null;
-            if (field.ParameterId.Value < 0)
+            if (field.ParameterId.IntegerValue < 0)
             {
-                return elem.get_Parameter((BuiltInParameter)field.ParameterId.Value);
+                return elem.get_Parameter((BuiltInParameter)field.ParameterId.IntegerValue);
             }
             return elem.LookupParameter(field.GetName());
         }

@@ -13,6 +13,8 @@ namespace RevitScheduleEditor
         private readonly Dictionary<string, string> _values;
         private readonly Dictionary<string, string> _originalValues;
 
+        public IReadOnlyDictionary<string, string> Values => _values;
+
         public ScheduleRow(Element element)
         {
             _element = element;
@@ -26,10 +28,9 @@ namespace RevitScheduleEditor
             get => _values.ContainsKey(fieldName) ? _values[fieldName] : string.Empty;
             set
             {
-                if (_values.ContainsKey(fieldName) && _values[fieldName] != value)
+                if (!_values.ContainsKey(fieldName) || _values[fieldName] != value)
                 {
                     _values[fieldName] = value;
-                    OnPropertyChanged(fieldName);
                     OnPropertyChanged(nameof(IsModified));
                 }
             }
@@ -43,32 +44,13 @@ namespace RevitScheduleEditor
         
         public Element GetElement() => _element;
 
-        public bool IsModified
-        {
-            get
-            {
-                foreach (var key in _values.Keys)
-                {
-                    if (_values[key] != _originalValues[key])
-                    {
-                        return true;
-                    }
-                }
-                return false;
-            }
-        }
+        public bool IsModified => _originalValues.Any(kvp => _values.ContainsKey(kvp.Key) && _values[kvp.Key] != kvp.Value);
         
         public Dictionary<string, string> GetModifiedValues()
         {
-            var modified = new Dictionary<string, string>();
-            foreach(var key in _values.Keys)
-            {
-                if (_values[key] != _originalValues[key])
-                {
-                    modified[key] = _values[key];
-                }
-            }
-            return modified;
+            return _originalValues
+                .Where(kvp => _values.ContainsKey(kvp.Key) && _values[kvp.Key] != kvp.Value)
+                .ToDictionary(kvp => kvp.Key, kvp => _values[kvp.Key]);
         }
 
         public void AcceptChanges()
