@@ -9,8 +9,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="DataGridExtensions" Version="2.7.0" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Reference Include="RevitAPI">
       <HintPath>C:\Program Files\Autodesk\Revit 2025\RevitAPI.dll</HintPath>
+
     </Reference>
     <Reference Include="RevitAPIUI">
       <HintPath>C:\Program Files\Autodesk\Revit 2025\RevitAPIUI.dll</HintPath>
@@ -18,10 +23,6 @@
     <Reference Include="AdWindows">
       <HintPath>C:\Program Files\Autodesk\Revit 2025\AdWindows.dll</HintPath>
     </Reference>
-  </ItemGroup>
-
-  <ItemGroup>
-    <PackageReference Include="DataGridExtensions" Version="2.6.0" />
   </ItemGroup>
 
 </Project>
