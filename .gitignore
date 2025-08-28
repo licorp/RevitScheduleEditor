@@ -1,0 +1,5 @@
+# Ignore Visual Studio and build folders
+.vs/
+.vscode/
+bin/
+obj/
