@@ -325,161 +325,51 @@ namespace RevitScheduleEditor
             if (SelectedSchedule == null) 
             {
                 DebugLog("SelectedSchedule is null, returning");
-                LoadingStatus = "No schedule selected";
                 return;
             }
 
             DebugLog($"Loading data for schedule: {SelectedSchedule.Name}");
-            LoadingStatus = "Initializing...";
             
             try
             {
                 _allScheduleData.Clear();
-                ScheduleData.Clear();
-                
-                // Check if schedule is valid and accessible
-                if (_doc == null || SelectedSchedule.IsValidObject == false)
-                {
-                    LoadingStatus = "Selected schedule is not valid or accessible";
-                    DebugLog("Selected schedule is not valid or accessible");
-                    return;
-                }
-
-                LoadingStatus = "Collecting elements...";
                 var collector = new FilteredElementCollector(_doc, SelectedSchedule.Id).WhereElementIsNotElementType();
                 var elements = collector.ToElements();
                 DebugLog($"Found {elements.Count} elements in schedule");
                 
-                if (elements.Count == 0)
-                {
-                    LoadingStatus = "No elements found in schedule";
-                    LoadingProgress = 100;
-                    DebugLog("No elements found in schedule - schedule may be empty");
-                    return;
-                }
-                
-                // Check for large datasets and warn user
-                if (elements.Count > 5000)
-                {
-                    var result = MessageBox.Show($"This schedule contains {elements.Count} items. Loading large datasets may take time and consume memory.\n\nDo you want to continue?", 
-                        "Large Dataset Warning", MessageBoxButton.YesNo, MessageBoxImage.Warning);
-                    if (result == MessageBoxResult.No)
-                    {
-                        LoadingStatus = "Loading cancelled by user";
-                        return;
-                    }
-                }
-
-                LoadingStatus = $"Loading {elements.Count} elements...";
-                LoadingProgress = 10;
-
                 var visibleFields = SelectedSchedule.Definition.GetFieldOrder()
                     .Select(id => SelectedSchedule.Definition.GetField(id))
                     .Where(f => !f.IsHidden).ToList();
-
                 DebugLog($"Found {visibleFields.Count} visible fields");
-                LoadingProgress = 20;
-
-                int processedCount = 0;
-                int batchSize = 500; // Process in batches to avoid memory issues
 
                 foreach (Element elem in elements)
                 {
-                    try
+                    var scheduleRow = new ScheduleRow(elem);
+                    foreach (var field in visibleFields)
                     {
-                        if (elem == null || !elem.IsValidObject) continue;
-
-                        var scheduleRow = new ScheduleRow(elem);
-                        
-                        foreach (var field in visibleFields)
-                        {
-                            try
-                            {
-                                Parameter param = GetParameterFromField(elem, field);
-                                string value = string.Empty;
-                                
-                                if (param != null)
-                                {
-                                    // Safe parameter value extraction
-                                    try
-                                    {
-                                        value = param.AsValueString() ?? param.AsString() ?? string.Empty;
-                                    }
-                                    catch
-                                    {
-                                        value = string.Empty; // Fallback for inaccessible parameters
-                                    }
-                                }
-                                
-                                scheduleRow.AddValue(field.GetName(), value);
-                            }
-                            catch (Exception fieldEx)
-                            {
-                                // Log field error but continue processing
-                                DebugLog($"Error processing field {field.GetName()}: {fieldEx.Message}");
-                                scheduleRow.AddValue(field.GetName(), string.Empty);
-                            }
-                        }
-                        
-                        _allScheduleData.Add(scheduleRow);
-                        processedCount++;
-
-                        // Update progress periodically
-                        if (processedCount % 100 == 0)
-                        {
-                            LoadingProgress = 20 + (double)processedCount / elements.Count * 70;
-                            LoadingStatus = $"Processing {processedCount}/{elements.Count} elements...";
-                        }
-
-                        // Force garbage collection for large datasets to prevent memory issues
-                        if (processedCount % batchSize == 0)
-                        {
-                            GC.Collect();
-                            GC.WaitForPendingFinalizers();
-                        }
+                        Parameter param = GetParameterFromField(elem, field);
+                        string value = param != null ? param.AsValueString() ?? param.AsString() ?? string.Empty : string.Empty;
+                        scheduleRow.AddValue(field.GetName(), value);
                     }
-                    catch (Exception elemEx)
-                    {
-                        // Log element error but continue processing other elements
-                        DebugLog($"Error processing element {elem?.Id}: {elemEx.Message}");
-                        continue;
-                    }
+                    _allScheduleData.Add(scheduleRow);
                 }
 
-                LoadingProgress = 90;
-                LoadingStatus = "Updating UI...";
+                DebugLog($"Loaded {_allScheduleData.Count} rows of schedule data");
 
-                // Update UI data
+                ScheduleData.Clear();
                 foreach (var row in _allScheduleData)
                 {
                     ScheduleData.Add(row);
                 }
                 
-                LoadingProgress = 100;
-                LoadingStatus = $"Completed: {ScheduleData.Count} elements loaded";
-                DebugLog($"Successfully loaded {ScheduleData.Count} elements");
-                
                 // Notify that data has changed so UI can regenerate filters
                 OnPropertyChanged(nameof(ScheduleData));
-            }
-            catch (OutOfMemoryException)
-            {
-                LoadingStatus = "Not enough memory to load this schedule";
-                DebugLog("OutOfMemoryException during loading");
-                
-                // Clear data to free memory
-                _allScheduleData.Clear();
-                ScheduleData.Clear();
-                GC.Collect();
+                DebugLog("LoadScheduleData completed successfully");
             }
             catch (Exception ex)
             {
-                LoadingStatus = $"Error: {ex.Message}";
                 DebugLog($"ERROR in LoadScheduleData: {ex.Message}\n{ex.StackTrace}");
-                
-                // Clear potentially corrupted data
-                _allScheduleData.Clear();
-                ScheduleData.Clear();
+                throw;
             }
         }
 
@@ -939,6 +829,97 @@ namespace RevitScheduleEditor
             return null;
         }
 
+        #region New Commands Implementation
+
+        // Preview/Edit Command
+        private void ExecutePreviewEdit(object parameter)
+        {
+            if (SelectedSchedule == null)
+            {
+                MessageBox.Show("Please select a schedule first.", "No Schedule Selected", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            
+            try
+            {
+                LoadScheduleData(null);
+                MessageBox.Show($"Successfully loaded {ScheduleData.Count} items from schedule '{SelectedSchedule.Name}'.", "Data Loaded", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error loading schedule data: {ex.Message}", "Load Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private bool CanExecutePreviewEdit(object parameter)
+        {
+            return SelectedSchedule != null;
+        }
+
+        // Import Command
+        private void ExecuteImport(object parameter)
+        {
+            try
+            {
+                var openFileDialog = new Microsoft.Win32.OpenFileDialog
+                {
+                    Filter = "CSV files (*.csv)|*.csv|Excel files (*.xlsx)|*.xlsx|All files (*.*)|*.*",
+                    Title = "Select CSV or Excel file to import"
+                };
+
+                if (openFileDialog.ShowDialog() == true)
+                {
+                    ImportFromExcel(openFileDialog.FileName);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error importing data: {ex.Message}", "Import Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private bool CanExecuteImport(object parameter)
+        {
+            return SelectedSchedule != null && ScheduleData.Count > 0;
+        }
+
+        // Export Command
+        private void ExecuteExport(object parameter)
+        {
+            try
+            {
+                if (ScheduleData.Count == 0)
+                {
+                    MessageBox.Show("No data to export.", "No Data", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                var saveFileDialog = new Microsoft.Win32.SaveFileDialog
+                {
+                    Filter = "Excel files (*.xlsx)|*.xlsx",
+                    Title = "Save Excel file",
+                    FileName = $"{SelectedSchedule?.Name ?? "Schedule"}_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx"
+                };
+
+                if (saveFileDialog.ShowDialog() == true)
+                {
+                    ExportToExcel(saveFileDialog.FileName);
+                    MessageBox.Show("Data exported successfully!", "Export Complete", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error exporting data: {ex.Message}", "Export Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private bool CanExecuteExport(object parameter)
+        {
+            return ScheduleData.Count > 0;
+        }
+
+        #endregion
+
         #region Excel Import/Export Implementation
 
         private void ImportFromExcel(string filePath)
@@ -1042,68 +1023,6 @@ namespace RevitScheduleEditor
             {
                 MessageBox.Show($"Error writing file: {ex.Message}", "Export Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
-        }
-
-        // Import Command
-        private void ExecuteImport(object parameter)
-        {
-            try
-            {
-                var openFileDialog = new Microsoft.Win32.OpenFileDialog
-                {
-                    Filter = "CSV files (*.csv)|*.csv|Excel files (*.xlsx)|*.xlsx|All files (*.*)|*.*",
-                    Title = "Select CSV or Excel file to import"
-                };
-
-                if (openFileDialog.ShowDialog() == true)
-                {
-                    ImportFromExcel(openFileDialog.FileName);
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Error importing data: {ex.Message}", "Import Error", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
-
-        private bool CanExecuteImport(object parameter)
-        {
-            return SelectedSchedule != null && ScheduleData.Count > 0;
-        }
-
-        // Export Command
-        private void ExecuteExport(object parameter)
-        {
-            try
-            {
-                if (ScheduleData.Count == 0)
-                {
-                    MessageBox.Show("No data to export.", "No Data", MessageBoxButton.OK, MessageBoxImage.Warning);
-                    return;
-                }
-
-                var saveFileDialog = new Microsoft.Win32.SaveFileDialog
-                {
-                    Filter = "Excel files (*.xlsx)|*.xlsx",
-                    Title = "Save Excel file",
-                    FileName = $"{SelectedSchedule?.Name ?? "Schedule"}_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx"
-                };
-
-                if (saveFileDialog.ShowDialog() == true)
-                {
-                    ExportToExcel(saveFileDialog.FileName);
-                    MessageBox.Show("Data exported successfully!", "Export Complete", MessageBoxButton.OK, MessageBoxImage.Information);
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Error exporting data: {ex.Message}", "Export Error", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
-
-        private bool CanExecuteExport(object parameter)
-        {
-            return ScheduleData.Count > 0;
         }
 
         #endregion

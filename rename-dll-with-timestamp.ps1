@@ -1,7 +1,7 @@
-$src = Join-Path $PSScriptRoot 'bin/Debug/RevitScheduleEditor.dll'
+$src = Join-Path $PSScriptRoot 'bin/Release/RevitScheduleEditor.dll'
 if (Test-Path $src) {
 	$dt = Get-Date -Format 'yyyyMMdd_HHmmss'
-	$dst = Join-Path $PSScriptRoot ("bin/Debug/RevitScheduleEditor_$dt.dll")
+	$dst = Join-Path $PSScriptRoot ("bin/Release/RevitScheduleEditor_$dt.dll")
 	Rename-Item -Path $src -NewName $dst
 	Write-Host "Renamed to $dst"
 } else {
