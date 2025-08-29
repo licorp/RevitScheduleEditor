@@ -115,33 +115,131 @@ namespace RevitScheduleEditor
         {
             if (SelectedSchedule == null) return;
 
-            _allScheduleData.Clear();
-            var collector = new FilteredElementCollector(_doc, SelectedSchedule.Id).WhereElementIsNotElementType();
-            var elements = collector.ToElements();
-            var visibleFields = SelectedSchedule.Definition.GetFieldOrder()
-                .Select(id => SelectedSchedule.Definition.GetField(id))
-                .Where(f => !f.IsHidden).ToList();
-
-            foreach (Element elem in elements)
+            try
             {
-                var scheduleRow = new ScheduleRow(elem);
-                foreach (var field in visibleFields)
+                _allScheduleData.Clear();
+                ScheduleData.Clear();
+                
+                // Check if schedule is valid and accessible
+                if (_doc == null || SelectedSchedule.IsValidObject == false)
                 {
-                    Parameter param = GetParameterFromField(elem, field);
-                    string value = param != null ? param.AsValueString() ?? param.AsString() ?? string.Empty : string.Empty;
-                    scheduleRow.AddValue(field.GetName(), value);
+                    MessageBox.Show("Selected schedule is not valid or accessible.", "Schedule Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
                 }
-                _allScheduleData.Add(scheduleRow);
-            }
 
-            ScheduleData.Clear();
-            foreach (var row in _allScheduleData)
-            {
-                ScheduleData.Add(row);
+                var collector = new FilteredElementCollector(_doc, SelectedSchedule.Id).WhereElementIsNotElementType();
+                var elements = collector.ToElements();
+                
+                // Check for large datasets and warn user
+                if (elements.Count > 5000)
+                {
+                    var result = MessageBox.Show($"This schedule contains {elements.Count} items. Loading large datasets may take time and consume memory.\n\nDo you want to continue?", 
+                        "Large Dataset Warning", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+                    if (result == MessageBoxResult.No)
+                        return;
+                }
+
+                var visibleFields = SelectedSchedule.Definition.GetFieldOrder()
+                    .Select(id => SelectedSchedule.Definition.GetField(id))
+                    .Where(f => !f.IsHidden).ToList();
+
+                int processedCount = 0;
+                int batchSize = 500; // Process in batches to avoid memory issues
+
+                foreach (Element elem in elements)
+                {
+                    try
+                    {
+                        if (elem == null || !elem.IsValidObject) continue;
+
+                        var scheduleRow = new ScheduleRow(elem);
+                        
+                        foreach (var field in visibleFields)
+                        {
+                            try
+                            {
+                                Parameter param = GetParameterFromField(elem, field);
+                                string value = string.Empty;
+                                
+                                if (param != null)
+                                {
+                                    // Safe parameter value extraction
+                                    try
+                                    {
+                                        value = param.AsValueString() ?? param.AsString() ?? string.Empty;
+                                    }
+                                    catch
+                                    {
+                                        value = string.Empty; // Fallback for inaccessible parameters
+                                    }
+                                }
+                                
+                                scheduleRow.AddValue(field.GetName(), value);
+                            }
+                            catch (Exception fieldEx)
+                            {
+                                // Log field error but continue processing
+                                System.Diagnostics.Debug.WriteLine($"Error processing field {field.GetName()}: {fieldEx.Message}");
+                                scheduleRow.AddValue(field.GetName(), string.Empty);
+                            }
+                        }
+                        
+                        _allScheduleData.Add(scheduleRow);
+                        processedCount++;
+
+                        // Force garbage collection for large datasets to prevent memory issues
+                        if (processedCount % batchSize == 0)
+                        {
+                            GC.Collect();
+                            GC.WaitForPendingFinalizers();
+                        }
+                    }
+                    catch (Exception elemEx)
+                    {
+                        // Log element error but continue processing other elements
+                        System.Diagnostics.Debug.WriteLine($"Error processing element {elem?.Id}: {elemEx.Message}");
+                        continue;
+                    }
+                }
+
+                // Update UI data in batches to improve responsiveness
+                Application.Current.Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    try
+                    {
+                        foreach (var row in _allScheduleData)
+                        {
+                            ScheduleData.Add(row);
+                        }
+                        
+                        // Notify that data has changed so UI can regenerate filters
+                        OnPropertyChanged(nameof(ScheduleData));
+                    }
+                    catch (Exception uiEx)
+                    {
+                        MessageBox.Show($"Error updating UI: {uiEx.Message}", "UI Update Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    }
+                }), System.Windows.Threading.DispatcherPriority.Background);
             }
-            
-            // Notify that data has changed so UI can regenerate filters
-            OnPropertyChanged(nameof(ScheduleData));
+            catch (OutOfMemoryException)
+            {
+                MessageBox.Show("Not enough memory to load this schedule. Please close other applications and try again, or contact your system administrator.", 
+                    "Memory Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                
+                // Clear data to free memory
+                _allScheduleData.Clear();
+                ScheduleData.Clear();
+                GC.Collect();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error loading schedule data: {ex.Message}\n\nPlease try again or contact support if the problem persists.", 
+                    "Load Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                
+                // Clear potentially corrupted data
+                _allScheduleData.Clear();
+                ScheduleData.Clear();
+            }
         }
 
         private void ExecuteAutofill(object parameter)
@@ -184,47 +282,155 @@ namespace RevitScheduleEditor
         
         private void UpdateModel(object obj)
         {
-            using (var trans = new Transaction(_doc, "Update from Schedule Editor"))
+            try
             {
-                trans.Start();
-                int updatedCount = 0;
-                var changedRows = _allScheduleData.Where(row => row.IsModified).ToList();
+                var changedRows = _allScheduleData?.Where(row => row?.IsModified == true)?.ToList() ?? new List<ScheduleRow>();
                 
-                foreach (var row in changedRows)
+                if (changedRows.Count == 0)
                 {
-                    Element elem = row.GetElement();
-                    var modifiedValues = row.GetModifiedValues();
-                    foreach (var modifiedPair in modifiedValues)
+                    MessageBox.Show("No changes to update.", "No Changes", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                // Check for large update operations and warn user
+                if (changedRows.Count > 1000)
+                {
+                    var result = MessageBox.Show($"You are about to update {changedRows.Count} elements. This may take time and cannot be easily undone.\n\nDo you want to continue?", 
+                        "Large Update Warning", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+                    if (result == MessageBoxResult.No)
+                        return;
+                }
+
+                using (var trans = new Transaction(_doc, "Update from Schedule Editor"))
+                {
+                    try
                     {
-                        Parameter param = elem.LookupParameter(modifiedPair.Key);
-                        if (param != null && !param.IsReadOnly)
+                        trans.Start();
+                        int updatedCount = 0;
+                        int errorCount = 0;
+                        int batchSize = 100; // Process in batches for large operations
+                        int currentBatch = 0;
+                        
+                        foreach (var row in changedRows)
                         {
                             try
                             {
-                                switch (param.StorageType)
+                                if (row?.GetElement() == null || !row.GetElement().IsValidObject)
                                 {
-                                    case StorageType.Integer:
-                                        if (int.TryParse(modifiedPair.Value, out int intValue)) param.Set(intValue);
-                                        break;
-                                    case StorageType.Double:
-                                        // Dùng SetValueString để Revit tự xử lý đơn vị
-                                        param.SetValueString(modifiedPair.Value);
-                                        break;
-                                    case StorageType.String:
-                                        param.Set(modifiedPair.Value);
-                                        break;
-                                    case StorageType.ElementId:
-                                        // Xử lý cho tham số ElementId nếu cần
-                                        break;
+                                    errorCount++;
+                                    continue;
                                 }
-                                updatedCount++;
-                            } catch {}
+
+                                Element elem = row.GetElement();
+                                var modifiedValues = row.GetModifiedValues();
+                                
+                                if (modifiedValues == null || modifiedValues.Count == 0)
+                                    continue;
+
+                                foreach (var modifiedPair in modifiedValues)
+                                {
+                                    try
+                                    {
+                                        if (string.IsNullOrEmpty(modifiedPair.Key))
+                                            continue;
+
+                                        Parameter param = elem.LookupParameter(modifiedPair.Key);
+                                        if (param != null && !param.IsReadOnly)
+                                        {
+                                            try
+                                            {
+                                                switch (param.StorageType)
+                                                {
+                                                    case StorageType.Integer:
+                                                        if (int.TryParse(modifiedPair.Value, out int intValue)) 
+                                                        {
+                                                            param.Set(intValue);
+                                                            updatedCount++;
+                                                        }
+                                                        break;
+                                                    case StorageType.Double:
+                                                        // Use SetValueString for Revit to handle units automatically
+                                                        if (!string.IsNullOrEmpty(modifiedPair.Value))
+                                                        {
+                                                            param.SetValueString(modifiedPair.Value);
+                                                            updatedCount++;
+                                                        }
+                                                        break;
+                                                    case StorageType.String:
+                                                        param.Set(modifiedPair.Value ?? string.Empty);
+                                                        updatedCount++;
+                                                        break;
+                                                    case StorageType.ElementId:
+                                                        // Handle ElementId parameters if needed
+                                                        if (int.TryParse(modifiedPair.Value, out int elementIdInt))
+                                                        {
+                                                            param.Set(new ElementId(elementIdInt));
+                                                            updatedCount++;
+                                                        }
+                                                        break;
+                                                }
+                                            }
+                                            catch (Exception paramEx)
+                                            {
+                                                System.Diagnostics.Debug.WriteLine($"Error updating parameter {modifiedPair.Key}: {paramEx.Message}");
+                                                errorCount++;
+                                            }
+                                        }
+                                    }
+                                    catch (Exception valueEx)
+                                    {
+                                        System.Diagnostics.Debug.WriteLine($"Error processing parameter value {modifiedPair.Key}: {valueEx.Message}");
+                                        errorCount++;
+                                    }
+                                }
+                                
+                                row.AcceptChanges();
+                                currentBatch++;
+
+                                // Periodic status update for large operations
+                                if (currentBatch >= batchSize)
+                                {
+                                    // Force memory cleanup for large operations
+                                    GC.Collect();
+                                    GC.WaitForPendingFinalizers();
+                                    currentBatch = 0;
+                                }
+                            }
+                            catch (Exception rowEx)
+                            {
+                                System.Diagnostics.Debug.WriteLine($"Error processing element {row?.GetElement()?.Id}: {rowEx.Message}");
+                                errorCount++;
+                                continue;
+                            }
                         }
+
+                        trans.Commit();
+                        
+                        string message = $"Successfully updated {updatedCount} parameters.";
+                        if (errorCount > 0)
+                        {
+                            message += $"\n{errorCount} errors occurred during update.";
+                        }
+                        
+                        MessageBox.Show(message, "Update Complete", MessageBoxButton.OK, MessageBoxImage.Information);
                     }
-                    row.AcceptChanges();
+                    catch (Exception transEx)
+                    {
+                        trans.RollBack();
+                        MessageBox.Show($"Transaction error: {transEx.Message}\n\nAll changes have been rolled back.", "Transaction Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    }
                 }
-                trans.Commit();
-                MessageBox.Show($"Updated {updatedCount} parameters.", "Success");
+            }
+            catch (OutOfMemoryException)
+            {
+                MessageBox.Show("Not enough memory to perform the update operation. Please close other applications and try again.", 
+                    "Memory Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                GC.Collect();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error during update: {ex.Message}\n\nPlease try again or contact support if the problem persists.", 
+                    "Update Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
         
@@ -579,12 +785,45 @@ namespace RevitScheduleEditor
             
             try
             {
-                LoadScheduleData(null);
-                MessageBox.Show($"Successfully loaded {ScheduleData.Count} items from schedule '{SelectedSchedule.Name}'.", "Data Loaded", MessageBoxButton.OK, MessageBoxImage.Information);
+                // Show loading message for large datasets
+                var loadingWindow = new Window
+                {
+                    Title = "Loading...",
+                    Content = new TextBlock { Text = "Loading schedule data, please wait...", Margin = new Thickness(20) },
+                    Width = 300,
+                    Height = 100,
+                    WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                    ResizeMode = ResizeMode.NoResize
+                };
+                
+                // Load data asynchronously to keep UI responsive
+                System.Threading.Tasks.Task.Run(() =>
+                {
+                    try
+                    {
+                        Application.Current.Dispatcher.Invoke(() => loadingWindow.Show());
+                        LoadScheduleData(null);
+                        
+                        Application.Current.Dispatcher.Invoke(() =>
+                        {
+                            loadingWindow.Close();
+                            MessageBox.Show($"Successfully loaded {ScheduleData.Count} items from schedule '{SelectedSchedule.Name}'.", 
+                                "Data Loaded", MessageBoxButton.OK, MessageBoxImage.Information);
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        Application.Current.Dispatcher.Invoke(() =>
+                        {
+                            loadingWindow.Close();
+                            MessageBox.Show($"Error loading schedule data: {ex.Message}", "Load Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                        });
+                    }
+                });
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error loading schedule data: {ex.Message}", "Load Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show($"Error starting data load: {ex.Message}", "Load Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -663,12 +902,51 @@ namespace RevitScheduleEditor
         {
             try
             {
-                // Simple CSV import implementation
-                var lines = System.IO.File.ReadAllLines(filePath);
+                // Check file size first to warn about large files
+                var fileInfo = new System.IO.FileInfo(filePath);
+                if (fileInfo.Length > 50 * 1024 * 1024) // 50MB
+                {
+                    var result = MessageBox.Show($"The selected file is {fileInfo.Length / (1024 * 1024):F1} MB. Large files may take time to process.\n\nDo you want to continue?", 
+                        "Large File Warning", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+                    if (result == MessageBoxResult.No)
+                        return;
+                }
+
+                // Simple CSV import implementation with memory management
+                string[] lines;
+                try
+                {
+                    lines = System.IO.File.ReadAllLines(filePath);
+                }
+                catch (OutOfMemoryException)
+                {
+                    MessageBox.Show("File is too large to load into memory. Please split the file into smaller parts.", "Memory Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    MessageBox.Show("Access denied. Please check file permissions and ensure the file is not open in another application.", "Access Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+                catch (System.IO.IOException ex)
+                {
+                    MessageBox.Show($"Error reading file: {ex.Message}\n\nPlease ensure the file is not corrupted and try again.", "File Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return;
+                }
+
                 if (lines.Length < 2)
                 {
                     MessageBox.Show("File must contain header and at least one data row.", "Invalid File", MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
+                }
+
+                // Check for extremely large datasets
+                if (lines.Length > 10000)
+                {
+                    var result = MessageBox.Show($"This file contains {lines.Length} rows. Processing large datasets may take significant time.\n\nDo you want to continue?", 
+                        "Large Dataset Warning", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+                    if (result == MessageBoxResult.No)
+                        return;
                 }
 
                 var headers = lines[0].Split(',');
@@ -681,41 +959,95 @@ namespace RevitScheduleEditor
                 }
 
                 int updatedCount = 0;
+                int errorCount = 0;
                 SaveStateForUndo(); // Save state before import
+
+                // Process in batches to manage memory
+                int batchSize = 100;
+                int currentBatch = 0;
 
                 for (int i = 1; i < lines.Length; i++)
                 {
-                    var values = lines[i].Split(',');
-                    if (values.Length <= elementIdIndex) continue;
-
-                    var elementIdStr = values[elementIdIndex].Trim();
-                    if (!long.TryParse(elementIdStr, out long elementId)) continue;
-
-                    // Find matching row
-                    var scheduleRow = ScheduleData.FirstOrDefault(row => row.GetElement().Id.IntegerValue == elementId);
-                    if (scheduleRow == null) continue;
-
-                    // Update values
-                    for (int j = 0; j < headers.Length && j < values.Length; j++)
+                    try
                     {
-                        if (j == elementIdIndex) continue; // Skip Element ID column
+                        var values = lines[i].Split(',');
+                        if (values.Length <= elementIdIndex) continue;
 
-                        var columnName = headers[j].Trim();
-                        var newValue = values[j].Trim();
-                        
-                        if (scheduleRow.Values.ContainsKey(columnName))
+                        var elementIdStr = values[elementIdIndex].Trim();
+                        if (!long.TryParse(elementIdStr, out long elementId)) continue;
+
+                        // Find matching row with null safety
+                        var scheduleRow = ScheduleData?.FirstOrDefault(row => 
                         {
-                            scheduleRow[columnName] = newValue;
+                            try
+                            {
+                                return row?.GetElement()?.Id?.IntegerValue == elementId;
+                            }
+                            catch
+                            {
+                                return false;
+                            }
+                        });
+                        
+                        if (scheduleRow == null) continue;
+
+                        // Update values with error handling
+                        for (int j = 0; j < headers.Length && j < values.Length; j++)
+                        {
+                            if (j == elementIdIndex) continue; // Skip Element ID column
+
+                            try
+                            {
+                                var columnName = headers[j].Trim();
+                                var newValue = values[j].Trim();
+                                
+                                if (scheduleRow.Values.ContainsKey(columnName))
+                                {
+                                    scheduleRow[columnName] = newValue;
+                                }
+                            }
+                            catch (Exception colEx)
+                            {
+                                System.Diagnostics.Debug.WriteLine($"Error updating column {j}: {colEx.Message}");
+                                errorCount++;
+                            }
+                        }
+                        updatedCount++;
+
+                        // Periodic garbage collection for large imports
+                        currentBatch++;
+                        if (currentBatch >= batchSize)
+                        {
+                            GC.Collect();
+                            GC.WaitForPendingFinalizers();
+                            currentBatch = 0;
                         }
                     }
-                    updatedCount++;
+                    catch (Exception rowEx)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Error processing row {i}: {rowEx.Message}");
+                        errorCount++;
+                        continue;
+                    }
                 }
 
-                MessageBox.Show($"Successfully imported data for {updatedCount} elements.", "Import Complete", MessageBoxButton.OK, MessageBoxImage.Information);
+                string message = $"Successfully imported data for {updatedCount} elements.";
+                if (errorCount > 0)
+                {
+                    message += $"\n{errorCount} errors occurred during import.";
+                }
+                
+                MessageBox.Show(message, "Import Complete", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (OutOfMemoryException)
+            {
+                MessageBox.Show("Not enough memory to process this file. Please close other applications or split the file into smaller parts.", 
+                    "Memory Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                GC.Collect();
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error reading file: {ex.Message}", "Import Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show($"Error during import: {ex.Message}\n\nPlease check the file format and try again.", "Import Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -723,42 +1055,146 @@ namespace RevitScheduleEditor
         {
             try
             {
-                var lines = new List<string>();
-                
-                // Get visible fields for headers
-                var visibleFields = SelectedSchedule.Definition.GetFieldOrder()
-                    .Select(id => SelectedSchedule.Definition.GetField(id))
-                    .Where(f => !f.IsHidden).ToList();
-
-                // Create header line
-                var headers = new List<string> { "Element ID" };
-                headers.AddRange(visibleFields.Select(f => f.GetName()));
-                lines.Add(string.Join(",", headers.Select(h => $"\"{h}\"")));
-
-                // Create data lines
-                foreach (var row in ScheduleData)
+                if (ScheduleData == null || ScheduleData.Count == 0)
                 {
-                    var values = new List<string> { row.GetElement().Id.IntegerValue.ToString() };
-                    
-                    foreach (var field in visibleFields)
-                    {
-                        var fieldName = field.GetName();
-                        var value = row.Values.ContainsKey(fieldName) ? row.Values[fieldName] : "";
-                        values.Add($"\"{value}\"");
-                    }
-                    
-                    lines.Add(string.Join(",", values));
+                    MessageBox.Show("No data to export.", "No Data", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
                 }
 
-                // Write to file (CSV format for simplicity)
-                var csvPath = System.IO.Path.ChangeExtension(filePath, ".csv");
-                System.IO.File.WriteAllLines(csvPath, lines);
+                // Check for large datasets and warn user
+                if (ScheduleData.Count > 5000)
+                {
+                    var result = MessageBox.Show($"Exporting {ScheduleData.Count} rows may take time and create a large file.\n\nDo you want to continue?", 
+                        "Large Dataset Warning", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+                    if (result == MessageBoxResult.No)
+                        return;
+                }
+
+                var lines = new List<string>();
                 
-                MessageBox.Show($"Data exported to: {csvPath}\n\nNote: File saved as CSV format for compatibility.", "Export Complete", MessageBoxButton.OK, MessageBoxImage.Information);
+                try
+                {
+                    // Get visible fields for headers with error handling
+                    var visibleFields = SelectedSchedule?.Definition?.GetFieldOrder()?
+                        .Select(id => 
+                        {
+                            try
+                            {
+                                return SelectedSchedule.Definition.GetField(id);
+                            }
+                            catch
+                            {
+                                return null;
+                            }
+                        })
+                        .Where(f => f != null && !f.IsHidden).ToList() ?? new List<ScheduleField>();
+
+                    // Create header line with safe field name extraction
+                    var headers = new List<string> { "Element ID" };
+                    foreach (var field in visibleFields)
+                    {
+                        try
+                        {
+                            headers.Add(field.GetName() ?? "Unknown");
+                        }
+                        catch
+                        {
+                            headers.Add("Unknown");
+                        }
+                    }
+                    lines.Add(string.Join(",", headers.Select(h => $"\"{h.Replace("\"", "\"\"")}\"")));
+
+                    // Create data lines with batch processing for large datasets
+                    int batchSize = 500;
+                    int processedCount = 0;
+
+                    foreach (var row in ScheduleData)
+                    {
+                        try
+                        {
+                            if (row?.GetElement()?.Id == null) continue;
+
+                            var values = new List<string> { row.GetElement().Id.IntegerValue.ToString() };
+                            
+                            foreach (var field in visibleFields)
+                            {
+                                try
+                                {
+                                    var fieldName = field.GetName();
+                                    var value = "";
+                                    
+                                    if (row.Values != null && row.Values.ContainsKey(fieldName))
+                                    {
+                                        value = row.Values[fieldName] ?? "";
+                                    }
+                                    
+                                    // Escape CSV special characters
+                                    value = value.Replace("\"", "\"\"");
+                                    values.Add($"\"{value}\"");
+                                }
+                                catch
+                                {
+                                    values.Add("\"\""); // Empty value for error cases
+                                }
+                            }
+                            
+                            lines.Add(string.Join(",", values));
+                            processedCount++;
+
+                            // Periodic garbage collection for large exports
+                            if (processedCount % batchSize == 0)
+                            {
+                                GC.Collect();
+                                GC.WaitForPendingFinalizers();
+                            }
+                        }
+                        catch (Exception rowEx)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"Error processing row for export: {rowEx.Message}");
+                            continue; // Skip problematic rows
+                        }
+                    }
+
+                    // Write to file with memory-efficient approach
+                    var csvPath = System.IO.Path.ChangeExtension(filePath, ".csv");
+                    
+                    try
+                    {
+                        using (var writer = new System.IO.StreamWriter(csvPath, false, System.Text.Encoding.UTF8))
+                        {
+                            foreach (var line in lines)
+                            {
+                                writer.WriteLine(line);
+                            }
+                        }
+                        
+                        MessageBox.Show($"Successfully exported {processedCount} rows to: {csvPath}\n\nNote: File saved as CSV format for compatibility.", 
+                            "Export Complete", MessageBoxButton.OK, MessageBoxImage.Information);
+                    }
+                    catch (UnauthorizedAccessException)
+                    {
+                        MessageBox.Show("Access denied. Please check file permissions and ensure the target location is writable.", "Access Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    }
+                    catch (System.IO.DirectoryNotFoundException)
+                    {
+                        MessageBox.Show("The specified directory does not exist. Please choose a valid location.", "Directory Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    }
+                    catch (System.IO.IOException ioEx)
+                    {
+                        MessageBox.Show($"Error writing file: {ioEx.Message}\n\nPlease ensure the file is not open in another application.", "File Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    }
+                }
+                catch (OutOfMemoryException)
+                {
+                    MessageBox.Show("Not enough memory to export this dataset. Please close other applications or export smaller portions of the data.", 
+                        "Memory Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    GC.Collect();
+                }
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error writing file: {ex.Message}", "Export Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show($"Error during export: {ex.Message}\n\nPlease try again or contact support if the problem persists.", 
+                    "Export Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
