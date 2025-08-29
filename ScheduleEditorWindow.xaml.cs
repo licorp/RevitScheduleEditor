@@ -43,11 +43,10 @@ namespace RevitScheduleEditor
                 if (args.PropertyName == nameof(_viewModel.SelectedSchedule))
                 {
                     GenerateDataGridColumns();
-                    GenerateFilterButtons();
                 }
                 else if (args.PropertyName == nameof(_viewModel.ScheduleData))
                 {
-                    GenerateFilterButtons();
+                    // Data updated - no need for separate filter generation
                 }
             };
             
@@ -57,20 +56,7 @@ namespace RevitScheduleEditor
                 if (_viewModel.SelectedSchedule != null)
                 {
                     GenerateDataGridColumns();
-                    GenerateFilterButtons();
                 }
-                
-                // Force generate filters with delay để đảm bảo UI đã loaded
-                this.Dispatcher.BeginInvoke(
-                    System.Windows.Threading.DispatcherPriority.Loaded,
-                    new System.Action(() =>
-                    {
-                        if (_viewModel.SelectedSchedule != null && _viewModel.ScheduleData.Count > 0)
-                        {
-                            GenerateFilterButtons();
-                        }
-                    })
-                );
                 
                 // Setup Excel-like enhanced autofill
                 SetupEnhancedAutofill();
@@ -177,9 +163,23 @@ namespace RevitScheduleEditor
                 .Select(id => _viewModel.SelectedSchedule.Definition.GetField(id))
                 .Where(f => !f.IsHidden).ToList();
 
-            // Get the Excel-like cell style
+            // Get the custom styles
             var excelCellStyle = this.FindResource("ExcelLikeCellStyle") as Style;
+            var filterHeaderStyle = this.FindResource("FilterColumnHeaderStyle") as Style;
 
+            // Add Element ID column first
+            var elementIdColumn = new DataGridTextColumn
+            {
+                Header = "Element ID",
+                Binding = new System.Windows.Data.Binding("Id") { Mode = BindingMode.OneWay },
+                Width = new DataGridLength(100),
+                IsReadOnly = true,
+                CellStyle = excelCellStyle,
+                HeaderStyle = filterHeaderStyle
+            };
+            dataGrid.Columns.Add(elementIdColumn);
+
+            // Add regular schedule fields
             foreach (var field in visibleFields)
             {
                 string fieldName = field.GetName();
@@ -187,13 +187,199 @@ namespace RevitScheduleEditor
                 {
                     Header = fieldName,
                     Binding = new System.Windows.Data.Binding($"[{fieldName}]") { Mode = BindingMode.TwoWay, UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged },
-                    CellStyle = excelCellStyle  // Apply Excel-like style with fill handle
+                    CellStyle = excelCellStyle,  // Apply Excel-like style with fill handle
+                    HeaderStyle = filterHeaderStyle  // Apply integrated filter header style
                 };
                 dataGrid.Columns.Add(column);
             }
             
             // Setup fill handle interactions
             SetupFillHandleInteractions(dataGrid);
+        }
+
+        // Event handler for integrated filter buttons in column headers
+        private void FilterButton_Click(object sender, RoutedEventArgs e)
+        {
+            var button = sender as Button;
+            if (button == null) return;
+
+            // Find the column header and get column name
+            var header = FindParent<DataGridColumnHeader>(button);
+            if (header?.Content == null) return;
+
+            string columnName = header.Content.ToString();
+            
+            // Create and show filter popup
+            ShowFilterPopup(button, columnName);
+        }
+
+        private void ShowFilterPopup(Button button, string columnName)
+        {
+            if (_viewModel.ScheduleData.Count == 0) return;
+
+            // Get unique values for this column
+            var uniqueValues = _viewModel.ScheduleData
+                .Select(row => row.Values.ContainsKey(columnName) ? row.Values[columnName] : "")
+                .Where(v => !string.IsNullOrEmpty(v))
+                .Distinct()
+                .OrderBy(v => v)
+                .ToList();
+
+            if (uniqueValues.Count == 0) return;
+
+            // Create popup with checkboxes
+            var popup = new System.Windows.Controls.Primitives.Popup();
+            var listBox = new ListBox
+            {
+                Width = 200,
+                MaxHeight = 300,
+                Background = Brushes.White,
+                BorderBrush = Brushes.Gray,
+                BorderThickness = new Thickness(1)
+            };
+
+            // Add "Select All" option
+            var selectAllItem = new CheckBox
+            {
+                Content = "(Select All)",
+                IsChecked = true,
+                Margin = new Thickness(2)
+            };
+            
+            selectAllItem.Checked += (s, e) => 
+            {
+                foreach (CheckBox cb in listBox.Items.OfType<CheckBox>().Skip(1))
+                    cb.IsChecked = true;
+            };
+            
+            selectAllItem.Unchecked += (s, e) => 
+            {
+                foreach (CheckBox cb in listBox.Items.OfType<CheckBox>().Skip(1))
+                    cb.IsChecked = false;
+            };
+
+            listBox.Items.Add(selectAllItem);
+
+            // Add separator
+            listBox.Items.Add(new Separator());
+
+            // Add value checkboxes
+            foreach (var value in uniqueValues)
+            {
+                var checkBox = new CheckBox
+                {
+                    Content = value,
+                    IsChecked = true,
+                    Margin = new Thickness(2)
+                };
+                listBox.Items.Add(checkBox);
+            }
+
+            // Add OK/Cancel buttons
+            var buttonPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(5)
+            };
+
+            var okButton = new Button
+            {
+                Content = "OK",
+                Width = 50,
+                Margin = new Thickness(2),
+                IsDefault = true
+            };
+
+            var cancelButton = new Button
+            {
+                Content = "Cancel",
+                Width = 50,
+                Margin = new Thickness(2),
+                IsCancel = true
+            };
+
+            okButton.Click += (s, e) =>
+            {
+                ApplyColumnFilter(columnName, listBox);
+                popup.IsOpen = false;
+            };
+
+            cancelButton.Click += (s, e) =>
+            {
+                popup.IsOpen = false;
+            };
+
+            buttonPanel.Children.Add(okButton);
+            buttonPanel.Children.Add(cancelButton);
+
+            var stackPanel = new StackPanel();
+            stackPanel.Children.Add(listBox);
+            stackPanel.Children.Add(buttonPanel);
+
+            popup.Child = stackPanel;
+            popup.PlacementTarget = button;
+            popup.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+            popup.StaysOpen = false;
+            popup.IsOpen = true;
+        }
+
+        private void ApplyColumnFilter(string columnName, ListBox listBox)
+        {
+            // Get selected values (skip "Select All" and separator)
+            var selectedValues = listBox.Items.OfType<CheckBox>()
+                .Skip(2) // Skip "Select All" and separator
+                .Where(cb => cb.IsChecked == true)
+                .Select(cb => cb.Content.ToString())
+                .ToHashSet();
+
+            if (selectedValues.Count == 0)
+            {
+                // If nothing selected, show all
+                var view = CollectionViewSource.GetDefaultView(_viewModel.ScheduleData);
+                view.Filter = null;
+                view.Refresh();
+                return;
+            }
+
+            // Update column filters
+            if (!_columnFilters.ContainsKey(columnName))
+                _columnFilters[columnName] = new HashSet<string>();
+            
+            _columnFilters[columnName] = selectedValues;
+
+            // Apply all filters
+            var collectionView = CollectionViewSource.GetDefaultView(_viewModel.ScheduleData);
+            collectionView.Filter = FilterPredicate;
+            collectionView.Refresh();
+        }
+
+        private bool FilterPredicate(object item)
+        {
+            if (item is ScheduleRow row)
+            {
+                // Global search filter
+                if (!string.IsNullOrEmpty(_viewModel.SearchText))
+                {
+                    bool globalMatch = row.Values.Values.Any(val => 
+                        val.ToLower().Contains(_viewModel.SearchText.ToLower()));
+                    if (!globalMatch) return false;
+                }
+
+                // Column-specific filters
+                foreach (var filter in _columnFilters)
+                {
+                    string cellValue = row[filter.Key] ?? string.Empty;
+                    
+                    // If filter has selected values and cell value is not in the selected set, exclude
+                    if (filter.Value.Count > 0 && !filter.Value.Contains(cellValue))
+                    {
+                        return false;
+                    }
+                }
+                return true;
+            }
+            return false;
         }
 
         private void SetupFillHandleInteractions(DataGrid dataGrid)
@@ -450,209 +636,6 @@ namespace RevitScheduleEditor
             
             // Default to repeating first value
             return seedValues[0];
-        }
-
-        private void GenerateFilterButtons()
-        {
-            var filterPanel = this.FindName("FilterPanel") as StackPanel;
-            if (filterPanel == null) return;
-            
-            filterPanel.Children.Clear();
-            _columnFilters.Clear();
-            _columnValues.Clear();
-
-            if (_viewModel.SelectedSchedule == null || _viewModel.ScheduleData.Count == 0) return;
-
-            var visibleFields = _viewModel.SelectedSchedule.Definition.GetFieldOrder()
-                .Select(id => _viewModel.SelectedSchedule.Definition.GetField(id))
-                .Where(f => !f.IsHidden).ToList();
-
-            foreach (var field in visibleFields)
-            {
-                string fieldName = field.GetName();
-                
-                // Collect all unique values for this column (including empty values)
-                var uniqueValues = _viewModel.ScheduleData
-                    .Select(row => row[fieldName] ?? string.Empty)
-                    .Distinct()
-                    .OrderBy(v => v)
-                    .ToList();
-
-                _columnValues[fieldName] = uniqueValues;
-                _columnFilters[fieldName] = new HashSet<string>(uniqueValues); // All selected by default
-
-                var filterButton = new Button
-                {
-                    Width = 120,
-                    Height = 25,
-                    Margin = new Thickness(2),
-                    Content = $"▼ {fieldName}",
-                    Tag = fieldName,
-                    Background = System.Windows.Media.Brushes.LightGray,
-                    BorderBrush = System.Windows.Media.Brushes.Gray,
-                    BorderThickness = new Thickness(1)
-                };
-
-                filterButton.Click += FilterButton_Click;
-                filterPanel.Children.Add(filterButton);
-            }
-        }
-
-        private void FilterButton_Click(object sender, RoutedEventArgs e)
-        {
-            var button = sender as Button;
-            if (button == null) return;
-
-            string fieldName = button.Tag.ToString();
-            var uniqueValues = _columnValues[fieldName];
-            var selectedValues = _columnFilters[fieldName];
-
-            // Create popup window với checkbox list
-            var filterWindow = new Window
-            {
-                Title = $"Filter {fieldName}",
-                Width = 300,
-                Height = 400,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                Owner = this,
-                ResizeMode = ResizeMode.NoResize
-            };
-
-            var mainGrid = new Grid();
-            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(35) });
-            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(40) });
-
-            // Search box
-            var searchPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(5) };
-            searchPanel.Children.Add(new TextBlock { Text = "Search:", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 5, 0) });
-            var searchBox = new TextBox { Width = 200 };
-            searchPanel.Children.Add(searchBox);
-            Grid.SetRow(searchPanel, 0);
-            mainGrid.Children.Add(searchPanel);
-
-            // Checkbox list
-            var scrollViewer = new ScrollViewer { Margin = new Thickness(5) };
-            var checkBoxPanel = new StackPanel();
-
-            // Select All / Clear All buttons
-            var selectAllPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 5) };
-            var selectAllCheckBox = new CheckBox { Content = "(Select All)", IsChecked = selectedValues.Count == uniqueValues.Count };
-            selectAllPanel.Children.Add(selectAllCheckBox);
-            checkBoxPanel.Children.Add(selectAllPanel);
-
-            // Individual checkboxes
-            var checkBoxes = new List<CheckBox>();
-            foreach (var value in uniqueValues)
-            {
-                var checkBox = new CheckBox
-                {
-                    Content = value,
-                    IsChecked = selectedValues.Contains(value),
-                    Margin = new Thickness(0, 2, 0, 2)
-                };
-                checkBoxes.Add(checkBox);
-                checkBoxPanel.Children.Add(checkBox);
-            }
-
-            selectAllCheckBox.Checked += (s, args) =>
-            {
-                foreach (var cb in checkBoxes) cb.IsChecked = true;
-            };
-            selectAllCheckBox.Unchecked += (s, args) =>
-            {
-                foreach (var cb in checkBoxes) cb.IsChecked = false;
-            };
-
-            // Search functionality
-            searchBox.TextChanged += (s, args) =>
-            {
-                string searchText = searchBox.Text.ToLower();
-                foreach (var cb in checkBoxes)
-                {
-                    cb.Visibility = string.IsNullOrEmpty(searchText) || 
-                                   cb.Content.ToString().ToLower().Contains(searchText) 
-                                   ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
-                }
-            };
-
-            scrollViewer.Content = checkBoxPanel;
-            Grid.SetRow(scrollViewer, 1);
-            mainGrid.Children.Add(scrollViewer);
-
-            // OK/Cancel buttons
-            var buttonPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(5) };
-            var okButton = new Button { Content = "OK", Width = 60, Height = 25, Margin = new Thickness(0, 0, 5, 0) };
-            var cancelButton = new Button { Content = "Cancel", Width = 60, Height = 25 };
-
-            okButton.Click += (s, args) =>
-            {
-                selectedValues.Clear();
-                foreach (var cb in checkBoxes)
-                {
-                    if (cb.IsChecked == true && cb.Visibility == System.Windows.Visibility.Visible)
-                    {
-                        selectedValues.Add(cb.Content.ToString());
-                    }
-                }
-                
-                // Update button appearance
-                button.Content = selectedValues.Count == uniqueValues.Count ? 
-                                $"▼ {fieldName}" : 
-                                $"▼ {fieldName} ({selectedValues.Count})";
-                
-                button.Background = selectedValues.Count == uniqueValues.Count ? 
-                                   System.Windows.Media.Brushes.LightGray : 
-                                   System.Windows.Media.Brushes.LightBlue;
-
-                ApplyFilters();
-                filterWindow.Close();
-            };
-
-            cancelButton.Click += (s, args) => filterWindow.Close();
-
-            buttonPanel.Children.Add(okButton);
-            buttonPanel.Children.Add(cancelButton);
-            Grid.SetRow(buttonPanel, 2);
-            mainGrid.Children.Add(buttonPanel);
-
-            filterWindow.Content = mainGrid;
-            filterWindow.ShowDialog();
-        }
-
-        private void ApplyFilters()
-        {
-            var view = CollectionViewSource.GetDefaultView(_viewModel.ScheduleData);
-            view.Filter = FilterPredicate;
-            view.Refresh();
-        }
-
-        private bool FilterPredicate(object item)
-        {
-            if (item is ScheduleRow row)
-            {
-                // Global search filter
-                if (!string.IsNullOrEmpty(_viewModel.SearchText))
-                {
-                    bool globalMatch = row.Values.Values.Any(val => 
-                        val.ToLower().Contains(_viewModel.SearchText.ToLower()));
-                    if (!globalMatch) return false;
-                }
-
-                // Column-specific filters
-                foreach (var filter in _columnFilters)
-                {
-                    string cellValue = row[filter.Key] ?? string.Empty;
-                    
-                    // If filter has selected values and cell value is not in the selected set, exclude
-                    if (filter.Value.Count > 0 && !filter.Value.Contains(cellValue))
-                    {
-                        return false;
-                    }
-                }
-                return true;
-            }
-            return false;
         }
 
         private void SetupEnhancedAutofill()

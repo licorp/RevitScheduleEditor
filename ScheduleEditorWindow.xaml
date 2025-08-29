@@ -63,56 +63,95 @@
             <Setter Property="BorderBrush" Value="DarkGray"/>
             <Setter Property="BorderThickness" Value="0,0,1,1"/>
         </Style>
+        
+        <!-- Custom Column Header Template with integrated Filter Button -->
+        <Style TargetType="DataGridColumnHeader" x:Key="FilterColumnHeaderStyle">
+            <Setter Property="Background" Value="#F0F0F0"/>
+            <Setter Property="BorderBrush" Value="DarkGray"/>
+            <Setter Property="BorderThickness" Value="0,0,1,1"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="DataGridColumnHeader">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                
+                                <!-- Column Name -->
+                                <TextBlock Grid.Column="0" 
+                                          Text="{TemplateBinding Content}"
+                                          VerticalAlignment="Center"
+                                          Margin="5,2"
+                                          TextTrimming="CharacterEllipsis"/>
+                                
+                                <!-- Filter Dropdown Button -->
+                                <Button Grid.Column="1"
+                                       x:Name="FilterButton"
+                                       Content="▼"
+                                       Width="20" Height="20"
+                                       Margin="2"
+                                       Background="Transparent"
+                                       BorderBrush="Gray"
+                                       BorderThickness="1"
+                                       FontSize="8"
+                                       ToolTip="Filter"
+                                       Click="FilterButton_Click"/>
+                            </Grid>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
     
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="5">
-            <TextBlock Text="Schedule:" VerticalAlignment="Center" Margin="0,0,5,0"/>
-            <ComboBox Width="300" 
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="10" Background="#F8F8F8" 
+                    Height="60" VerticalAlignment="Top">
+            <TextBlock Text="Schedule:" VerticalAlignment="Center" Margin="0,0,8,0" FontWeight="SemiBold"/>
+            <ComboBox Width="320" Height="28" VerticalAlignment="Center"
                       ItemsSource="{Binding Schedules}"
                       SelectedItem="{Binding SelectedSchedule}"
                       DisplayMemberPath="Name"/>
-            <TextBlock Text="Global Search:" VerticalAlignment="Center" Margin="20,0,5,0"/>
-            <TextBox Width="200" VerticalAlignment="Center"
+            <TextBlock Text="Global Search:" VerticalAlignment="Center" Margin="25,0,8,0" FontWeight="SemiBold"/>
+            <TextBox Width="220" Height="28" VerticalAlignment="Center"
                      Text="{Binding SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
             
             <!-- Excel-like toolbar -->
-            <Separator Margin="20,0,10,0"/>
-            <Button Content="📋 Copy" Margin="2" Padding="5,2" ToolTip="Copy (Ctrl+C)" 
+            <Separator Margin="25,0,15,0"/>
+            <Button Content="📋 Copy" Margin="3" Padding="8,4" Height="32" ToolTip="Copy (Ctrl+C)" 
                     Command="{Binding CopyCommand}" CommandParameter="{Binding SelectedCells, ElementName=ScheduleDataGrid}"/>
-            <Button Content="📄 Paste" Margin="2" Padding="5,2" ToolTip="Paste (Ctrl+V)"
+            <Button Content="📄 Paste" Margin="3" Padding="8,4" Height="32" ToolTip="Paste (Ctrl+V)"
                     Command="{Binding PasteCommand}" CommandParameter="{Binding SelectedCells, ElementName=ScheduleDataGrid}"/>
-            <Button Content="✂️ Cut" Margin="2" Padding="5,2" ToolTip="Cut (Ctrl+X)"
+            <Button Content="✂️ Cut" Margin="3" Padding="8,4" Height="32" ToolTip="Cut (Ctrl+X)"
                     Command="{Binding CutCommand}" CommandParameter="{Binding SelectedCells, ElementName=ScheduleDataGrid}"/>
-            <Separator Margin="5,0"/>
-            <Button Content="⬇️ Fill Down" Margin="2" Padding="5,2" ToolTip="Fill Down (Ctrl+D)"
+            <Separator Margin="8,0"/>
+            <Button Content="⬇️ Fill Down" Margin="3" Padding="8,4" Height="32" ToolTip="Fill Down (Ctrl+D)"
                     Command="{Binding FillDownCommand}" CommandParameter="{Binding SelectedCells, ElementName=ScheduleDataGrid}"/>
-            <Button Content="➡️ Fill Right" Margin="2" Padding="5,2" ToolTip="Fill Right (Ctrl+R)"
+            <Button Content="➡️ Fill Right" Margin="3" Padding="8,4" Height="32" ToolTip="Fill Right (Ctrl+R)"
                     Command="{Binding FillRightCommand}" CommandParameter="{Binding SelectedCells, ElementName=ScheduleDataGrid}"/>
-            <Button Content="🔢 Smart Fill" Margin="2" Padding="5,2" ToolTip="Smart Autofill (Ctrl+F)"
+            <Button Content="🔢 Smart Fill" Margin="3" Padding="8,4" Height="32" ToolTip="Smart Autofill (Ctrl+F)"
                     Command="{Binding AutofillCommand}" CommandParameter="{Binding SelectedCells, ElementName=ScheduleDataGrid}"/>
-            <Separator Margin="5,0"/>
-            <Button Content="↶ Undo" Margin="2" Padding="5,2" ToolTip="Undo (Ctrl+Z)"
+            <Separator Margin="8,0"/>
+            <Button Content="↶ Undo" Margin="3" Padding="8,4" Height="32" ToolTip="Undo (Ctrl+Z)"
                     Command="{Binding UndoCommand}"/>
-            <Button Content="↷ Redo" Margin="2" Padding="5,2" ToolTip="Redo (Ctrl+Y)"
+            <Button Content="↷ Redo" Margin="3" Padding="8,4" Height="32" ToolTip="Redo (Ctrl+Y)"
                     Command="{Binding RedoCommand}"/>
         </StackPanel>
 
-        <!-- Filter Row với dropdown buttons -->
-        <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
-            <StackPanel x:Name="FilterPanel" Orientation="Horizontal" Margin="5" Background="LightBlue" Height="40"/>
-        </ScrollViewer>
-
-        <!-- DataGrid với filter và Excel-like features -->
+        <!-- DataGrid với filter buttons integrated trong column headers -->
         <DataGrid x:Name="ScheduleDataGrid"
-                  Grid.Row="2"
+                  Grid.Row="1"
                   Margin="5"
                   ItemsSource="{Binding ScheduleData}"
                   AutoGenerateColumns="False" 
