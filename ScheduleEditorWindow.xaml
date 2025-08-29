@@ -8,11 +8,56 @@
         Title="Schedule Editor (Revit 2020)" Height="700" Width="1000">
     
     <Window.Resources>
+        <!-- Excel-like Cell Style with Fill Handle -->
+        <Style TargetType="DataGridCell" x:Key="ExcelLikeCellStyle">
+            <Setter Property="BorderBrush" Value="#D6D6D6"/>
+            <Setter Property="BorderThickness" Value="0,0,1,1"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="DataGridCell">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}">
+                            <Grid>
+                                <ContentPresenter VerticalAlignment="Center" Margin="4,2"/>
+                                
+                                <!-- Fill Handle - visible khi cell selected -->
+                                <Rectangle x:Name="FillHandle"
+                                          Width="6" Height="6"
+                                          Fill="#0078D4"
+                                          HorizontalAlignment="Right"
+                                          VerticalAlignment="Bottom"
+                                          Margin="0,0,-1,-1"
+                                          Cursor="SizeNWSE"
+                                          Visibility="Collapsed"/>
+                            </Grid>
+                        </Border>
+                        
+                        <ControlTemplate.Triggers>
+                            <!-- Show fill handle when selected -->
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="FillHandle" Property="Visibility" Value="Visible"/>
+                                <Setter Property="Background" Value="#E3F2FD"/>
+                            </Trigger>
+                            
+                            <!-- Highlight fill handle on hover -->
+                            <Trigger SourceName="FillHandle" Property="IsMouseOver" Value="True">
+                                <Setter TargetName="FillHandle" Property="Fill" Value="#106EBE"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        
+        <!-- Default DataGridCell Style -->
         <Style TargetType="DataGridCell">
             <Setter Property="BorderBrush" Value="#D6D6D6"/>
             <Setter Property="BorderThickness" Value="0,0,1,1"/>
             <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
         </Style>
+        
         <Style TargetType="DataGridRowHeader">
             <Setter Property="Background" Value="#F0F0F0"/>
             <Setter Property="BorderBrush" Value="DarkGray"/>
@@ -37,6 +82,27 @@
             <TextBlock Text="Global Search:" VerticalAlignment="Center" Margin="20,0,5,0"/>
             <TextBox Width="200" VerticalAlignment="Center"
                      Text="{Binding SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+            
+            <!-- Excel-like toolbar -->
+            <Separator Margin="20,0,10,0"/>
+            <Button Content="📋 Copy" Margin="2" Padding="5,2" ToolTip="Copy (Ctrl+C)" 
+                    Command="{Binding CopyCommand}" CommandParameter="{Binding SelectedCells, ElementName=ScheduleDataGrid}"/>
+            <Button Content="📄 Paste" Margin="2" Padding="5,2" ToolTip="Paste (Ctrl+V)"
+                    Command="{Binding PasteCommand}" CommandParameter="{Binding SelectedCells, ElementName=ScheduleDataGrid}"/>
+            <Button Content="✂️ Cut" Margin="2" Padding="5,2" ToolTip="Cut (Ctrl+X)"
+                    Command="{Binding CutCommand}" CommandParameter="{Binding SelectedCells, ElementName=ScheduleDataGrid}"/>
+            <Separator Margin="5,0"/>
+            <Button Content="⬇️ Fill Down" Margin="2" Padding="5,2" ToolTip="Fill Down (Ctrl+D)"
+                    Command="{Binding FillDownCommand}" CommandParameter="{Binding SelectedCells, ElementName=ScheduleDataGrid}"/>
+            <Button Content="➡️ Fill Right" Margin="2" Padding="5,2" ToolTip="Fill Right (Ctrl+R)"
+                    Command="{Binding FillRightCommand}" CommandParameter="{Binding SelectedCells, ElementName=ScheduleDataGrid}"/>
+            <Button Content="🔢 Smart Fill" Margin="2" Padding="5,2" ToolTip="Smart Autofill (Ctrl+F)"
+                    Command="{Binding AutofillCommand}" CommandParameter="{Binding SelectedCells, ElementName=ScheduleDataGrid}"/>
+            <Separator Margin="5,0"/>
+            <Button Content="↶ Undo" Margin="2" Padding="5,2" ToolTip="Undo (Ctrl+Z)"
+                    Command="{Binding UndoCommand}"/>
+            <Button Content="↷ Redo" Margin="2" Padding="5,2" ToolTip="Redo (Ctrl+Y)"
+                    Command="{Binding RedoCommand}"/>
         </StackPanel>
 
         <!-- Filter Row với dropdown buttons -->
@@ -44,17 +110,51 @@
             <StackPanel x:Name="FilterPanel" Orientation="Horizontal" Margin="5" Background="LightBlue" Height="40"/>
         </ScrollViewer>
 
-        <!-- DataGrid với filter -->
+        <!-- DataGrid với filter và Excel-like features -->
         <DataGrid x:Name="ScheduleDataGrid"
                   Grid.Row="2"
                   Margin="5"
                   ItemsSource="{Binding ScheduleData}"
                   AutoGenerateColumns="False" 
                   CanUserAddRows="False"
+                  CanUserDeleteRows="False"
+                  IsReadOnly="False"
                   GridLinesVisibility="All"
                   HeadersVisibility="Column"
                   CanUserResizeColumns="True"
-                  CanUserSortColumns="True">
+                  CanUserSortColumns="True"
+                  SelectionMode="Extended"
+                  SelectionUnit="Cell"
+                  EnableRowVirtualization="False"
+                  EnableColumnVirtualization="False">
+            
+            <!-- Input Bindings for keyboard shortcuts -->
+            <DataGrid.InputBindings>
+                <KeyBinding Key="C" Modifiers="Ctrl" Command="{Binding CopyCommand}" CommandParameter="{Binding SelectedCells, RelativeSource={RelativeSource AncestorType=DataGrid}}"/>
+                <KeyBinding Key="V" Modifiers="Ctrl" Command="{Binding PasteCommand}" CommandParameter="{Binding SelectedCells, RelativeSource={RelativeSource AncestorType=DataGrid}}"/>
+                <KeyBinding Key="X" Modifiers="Ctrl" Command="{Binding CutCommand}" CommandParameter="{Binding SelectedCells, RelativeSource={RelativeSource AncestorType=DataGrid}}"/>
+                <KeyBinding Key="Z" Modifiers="Ctrl" Command="{Binding UndoCommand}"/>
+                <KeyBinding Key="Y" Modifiers="Ctrl" Command="{Binding RedoCommand}"/>
+                <KeyBinding Key="D" Modifiers="Ctrl" Command="{Binding FillDownCommand}" CommandParameter="{Binding SelectedCells, RelativeSource={RelativeSource AncestorType=DataGrid}}"/>
+                <KeyBinding Key="R" Modifiers="Ctrl" Command="{Binding FillRightCommand}" CommandParameter="{Binding SelectedCells, RelativeSource={RelativeSource AncestorType=DataGrid}}"/>
+                <KeyBinding Key="F" Modifiers="Ctrl" Command="{Binding AutofillCommand}" CommandParameter="{Binding SelectedCells, RelativeSource={RelativeSource AncestorType=DataGrid}}"/>
+            </DataGrid.InputBindings>
+            
+            <!-- Context Menu -->
+            <DataGrid.ContextMenu>
+                <ContextMenu>
+                    <MenuItem Header="Copy" Command="{Binding CopyCommand}" CommandParameter="{Binding SelectedCells, RelativeSource={RelativeSource AncestorType=DataGrid}}" InputGestureText="Ctrl+C"/>
+                    <MenuItem Header="Paste" Command="{Binding PasteCommand}" CommandParameter="{Binding SelectedCells, RelativeSource={RelativeSource AncestorType=DataGrid}}" InputGestureText="Ctrl+V"/>
+                    <MenuItem Header="Cut" Command="{Binding CutCommand}" CommandParameter="{Binding SelectedCells, RelativeSource={RelativeSource AncestorType=DataGrid}}" InputGestureText="Ctrl+X"/>
+                    <Separator/>
+                    <MenuItem Header="Fill Down" Command="{Binding FillDownCommand}" CommandParameter="{Binding SelectedCells, RelativeSource={RelativeSource AncestorType=DataGrid}}" InputGestureText="Ctrl+D"/>
+                    <MenuItem Header="Fill Right" Command="{Binding FillRightCommand}" CommandParameter="{Binding SelectedCells, RelativeSource={RelativeSource AncestorType=DataGrid}}" InputGestureText="Ctrl+R"/>
+                    <MenuItem Header="Autofill" Command="{Binding AutofillCommand}" CommandParameter="{Binding SelectedCells, RelativeSource={RelativeSource AncestorType=DataGrid}}" InputGestureText="Ctrl+F"/>
+                    <Separator/>
+                    <MenuItem Header="Undo" Command="{Binding UndoCommand}" InputGestureText="Ctrl+Z"/>
+                    <MenuItem Header="Redo" Command="{Binding RedoCommand}" InputGestureText="Ctrl+Y"/>
+                </ContextMenu>
+            </DataGrid.ContextMenu>
         </DataGrid>
 
         <Button Grid.Row="3" 
