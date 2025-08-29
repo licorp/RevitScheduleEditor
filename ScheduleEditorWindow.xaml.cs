@@ -1,6 +1,7 @@
 using Autodesk.Revit.DB;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -29,36 +30,72 @@ namespace RevitScheduleEditor
         private Dictionary<string, HashSet<string>> _columnFilters = new Dictionary<string, HashSet<string>>();
         private Dictionary<string, List<string>> _columnValues = new Dictionary<string, List<string>>();
 
+        // Debug logging methods
+        private void DebugLog(string message)
+        {
+            string timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
+            string fullMessage = $"[ScheduleEditorWindow] {timestamp} - {message}";
+            OutputDebugStringA(fullMessage + "\r\n");
+            Debug.WriteLine(fullMessage);
+        }
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Ansi)]
+        private static extern void OutputDebugStringA(string lpOutputString);
+
         public ScheduleEditorWindow(Document doc)
         {
-            InitializeComponent();
-            _viewModel = new ScheduleEditorViewModel(doc);
-            this.DataContext = _viewModel;
+            DebugLog("=== ScheduleEditorWindow Constructor Started ===");
             
-            // Setup Excel-like behaviors
-            SetupExcelLikeBehaviors();
-            
-            _viewModel.PropertyChanged += (sender, args) =>
+            try
             {
-                if (args.PropertyName == nameof(_viewModel.SelectedSchedule))
-                {
-                    // Don't auto-generate columns anymore - wait for Preview/Edit button
-                }
-                else if (args.PropertyName == nameof(_viewModel.ScheduleData))
-                {
-                    // Data updated - regenerate columns only when data is loaded
-                    GenerateDataGridColumns();
-                }
-            };
-            
-            // Gọi ngay lập tức nếu đã có SelectedSchedule
-            this.Loaded += (sender, args) =>
-            {
-                // Don't auto-load data anymore - user needs to click Preview/Edit
+                InitializeComponent();
+                DebugLog("InitializeComponent completed");
                 
-                // Setup Excel-like enhanced autofill
-                SetupEnhancedAutofill();
-            };
+                _viewModel = new ScheduleEditorViewModel(doc);
+                DebugLog("ScheduleEditorViewModel created");
+                
+                this.DataContext = _viewModel;
+                DebugLog("DataContext set to ViewModel");
+                
+                // Setup Excel-like behaviors
+                SetupExcelLikeBehaviors();
+                DebugLog("Excel-like behaviors setup completed");
+                
+                _viewModel.PropertyChanged += (sender, args) =>
+                {
+                    DebugLog($"ViewModel PropertyChanged: {args.PropertyName}");
+                    
+                    if (args.PropertyName == nameof(_viewModel.SelectedSchedule))
+                    {
+                        DebugLog("SelectedSchedule changed - waiting for Preview/Edit button");
+                        // Don't auto-generate columns anymore - wait for Preview/Edit button
+                    }
+                    else if (args.PropertyName == nameof(_viewModel.ScheduleData))
+                    {
+                        DebugLog("ScheduleData changed - regenerating DataGrid columns");
+                        // Data updated - regenerate columns only when data is loaded
+                        GenerateDataGridColumns();
+                    }
+                };
+                
+                // Gọi ngay lập tức nếu đã có SelectedSchedule
+                this.Loaded += (sender, args) =>
+                {
+                    DebugLog("Window Loaded event fired");
+                    // Don't auto-load data anymore - user needs to click Preview/Edit
+                    
+                    // Setup Excel-like enhanced autofill
+                    SetupEnhancedAutofill();
+                    DebugLog("Enhanced autofill setup completed");
+                };
+                
+                DebugLog("ScheduleEditorWindow constructor completed successfully");
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"ERROR in ScheduleEditorWindow constructor: {ex.Message}\n{ex.StackTrace}");
+                throw;
+            }
         }
 
         private void SetupExcelLikeBehaviors()
