@@ -42,21 +42,19 @@ namespace RevitScheduleEditor
             {
                 if (args.PropertyName == nameof(_viewModel.SelectedSchedule))
                 {
-                    GenerateDataGridColumns();
+                    // Don't auto-generate columns anymore - wait for Preview/Edit button
                 }
                 else if (args.PropertyName == nameof(_viewModel.ScheduleData))
                 {
-                    // Data updated - no need for separate filter generation
+                    // Data updated - regenerate columns only when data is loaded
+                    GenerateDataGridColumns();
                 }
             };
             
             // Gọi ngay lập tức nếu đã có SelectedSchedule
             this.Loaded += (sender, args) =>
             {
-                if (_viewModel.SelectedSchedule != null)
-                {
-                    GenerateDataGridColumns();
-                }
+                // Don't auto-load data anymore - user needs to click Preview/Edit
                 
                 // Setup Excel-like enhanced autofill
                 SetupEnhancedAutofill();
@@ -218,12 +216,27 @@ namespace RevitScheduleEditor
             if (_viewModel.ScheduleData.Count == 0) return;
 
             // Get unique values for this column
-            var uniqueValues = _viewModel.ScheduleData
-                .Select(row => row.Values.ContainsKey(columnName) ? row.Values[columnName] : "")
-                .Where(v => !string.IsNullOrEmpty(v))
-                .Distinct()
-                .OrderBy(v => v)
-                .ToList();
+            var uniqueValues = new List<string>();
+            
+            if (columnName == "Element ID")
+            {
+                // Special handling for Element ID column
+                uniqueValues = _viewModel.ScheduleData
+                    .Select(row => row.GetElement().Id.IntegerValue.ToString())
+                    .Distinct()
+                    .OrderBy(v => long.Parse(v))
+                    .ToList();
+            }
+            else
+            {
+                // Regular column values
+                uniqueValues = _viewModel.ScheduleData
+                    .Select(row => row.Values.ContainsKey(columnName) ? row.Values[columnName] : "")
+                    .Where(v => !string.IsNullOrEmpty(v))
+                    .Distinct()
+                    .OrderBy(v => v)
+                    .ToList();
+            }
 
             if (uniqueValues.Count == 0) return;
 
@@ -326,32 +339,125 @@ namespace RevitScheduleEditor
 
         private void ApplyColumnFilter(string columnName, ListBox listBox)
         {
-            // Get selected values (skip "Select All" and separator)
-            var selectedValues = listBox.Items.OfType<CheckBox>()
-                .Skip(2) // Skip "Select All" and separator
-                .Where(cb => cb.IsChecked == true)
-                .Select(cb => cb.Content.ToString())
-                .ToHashSet();
-
-            if (selectedValues.Count == 0)
+            try
             {
-                // If nothing selected, show all
-                var view = CollectionViewSource.GetDefaultView(_viewModel.ScheduleData);
-                view.Filter = null;
-                view.Refresh();
-                return;
+                // Get selected values (skip "Select All" checkbox and separator)
+                var selectedValues = listBox.Items.OfType<CheckBox>()
+                    .Where(cb => cb.Content.ToString() != "(Select All)")
+                    .Where(cb => cb.IsChecked == true)
+                    .Select(cb => cb.Content.ToString())
+                    .ToHashSet();
+
+                // Get all possible values for comparison (excluding "Select All")
+                var allValues = listBox.Items.OfType<CheckBox>()
+                    .Where(cb => cb.Content.ToString() != "(Select All)")
+                    .Select(cb => cb.Content.ToString())
+                    .ToHashSet();
+
+                bool hasFilter = selectedValues.Count != allValues.Count;
+
+                // Debug info
+                System.Diagnostics.Debug.WriteLine($"Filter for '{columnName}': Selected {selectedValues.Count} of {allValues.Count} values");
+
+                if (selectedValues.Count == 0)
+                {
+                    // If nothing selected, show all by removing filter
+                    if (_columnFilters.ContainsKey(columnName))
+                        _columnFilters.Remove(columnName);
+                    hasFilter = false;
+                }
+                else if (selectedValues.Count == allValues.Count)
+                {
+                    // If all selected, remove filter (show all)
+                    if (_columnFilters.ContainsKey(columnName))
+                        _columnFilters.Remove(columnName);
+                    hasFilter = false;
+                }
+                else
+                {
+                    // Update column filters
+                    _columnFilters[columnName] = selectedValues;
+                    System.Diagnostics.Debug.WriteLine($"Applied filter values: {string.Join(", ", selectedValues)}");
+                }
+
+                // Update column header appearance
+                UpdateColumnHeaderAppearance(columnName, hasFilter);
+
+                // Apply all filters
+                var collectionView = CollectionViewSource.GetDefaultView(_viewModel.ScheduleData);
+                collectionView.Filter = FilterPredicate;
+                collectionView.Refresh();
+                
+                System.Diagnostics.Debug.WriteLine($"After filter: {collectionView.Cast<object>().Count()} items visible");
             }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error applying filter: {ex.Message}", "Filter Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
 
-            // Update column filters
-            if (!_columnFilters.ContainsKey(columnName))
-                _columnFilters[columnName] = new HashSet<string>();
-            
-            _columnFilters[columnName] = selectedValues;
+        private void UpdateColumnHeaderAppearance(string columnName, bool hasFilter)
+        {
+            var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
+            if (dataGrid == null) return;
 
-            // Apply all filters
-            var collectionView = CollectionViewSource.GetDefaultView(_viewModel.ScheduleData);
-            collectionView.Filter = FilterPredicate;
-            collectionView.Refresh();
+            // Force the visual tree to be generated
+            dataGrid.UpdateLayout();
+
+            foreach (DataGridColumn column in dataGrid.Columns)
+            {
+                if (column.Header.ToString() == columnName)
+                {
+                    // Set Tag on the column to trigger visual state
+                    if (hasFilter)
+                    {
+                        column.HeaderStyle = this.FindResource("FilterColumnHeaderStyleActive") as Style ?? column.HeaderStyle;
+                    }
+                    else
+                    {
+                        column.HeaderStyle = this.FindResource("FilterColumnHeaderStyle") as Style;
+                    }
+                    break;
+                }
+            }
+        }
+
+        private DataGridColumnHeader GetColumnHeader(DataGrid dataGrid, DataGridColumn column)
+        {
+            // Get the column header presenter
+            var presenter = GetVisualChild<DataGridColumnHeadersPresenter>(dataGrid);
+            if (presenter != null)
+            {
+                for (int i = 0; i < presenter.Items.Count; i++)
+                {
+                    var header = presenter.ItemContainerGenerator.ContainerFromIndex(i) as DataGridColumnHeader;
+                    if (header != null && header.Column == column)
+                    {
+                        return header;
+                    }
+                }
+            }
+            return null;
+        }
+
+        private T GetVisualChild<T>(DependencyObject parent) where T : Visual
+        {
+            T child = default(T);
+            int numVisuals = VisualTreeHelper.GetChildrenCount(parent);
+            for (int i = 0; i < numVisuals; i++)
+            {
+                Visual v = (Visual)VisualTreeHelper.GetChild(parent, i);
+                child = v as T;
+                if (child == null)
+                {
+                    child = GetVisualChild<T>(v);
+                }
+                if (child != null)
+                {
+                    break;
+                }
+            }
+            return child;
         }
 
         private bool FilterPredicate(object item)
@@ -369,11 +475,25 @@ namespace RevitScheduleEditor
                 // Column-specific filters
                 foreach (var filter in _columnFilters)
                 {
-                    string cellValue = row[filter.Key] ?? string.Empty;
+                    string cellValue;
+                    
+                    // Special handling for Element ID column
+                    if (filter.Key == "Element ID")
+                    {
+                        cellValue = row.GetElement().Id.IntegerValue.ToString();
+                    }
+                    else
+                    {
+                        cellValue = row[filter.Key] ?? string.Empty;
+                    }
+                    
+                    // Debug logging
+                    System.Diagnostics.Debug.WriteLine($"Filter '{filter.Key}': checking '{cellValue}' against {filter.Value.Count} selected values");
                     
                     // If filter has selected values and cell value is not in the selected set, exclude
                     if (filter.Value.Count > 0 && !filter.Value.Contains(cellValue))
                     {
+                        System.Diagnostics.Debug.WriteLine($"Excluding row because '{cellValue}' not in selected values");
                         return false;
                     }
                 }

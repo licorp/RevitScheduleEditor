@@ -46,6 +46,12 @@ namespace RevitScheduleEditor
         public ICommand RedoCommand { get; }
         public ICommand FillDownCommand { get; }
         public ICommand FillRightCommand { get; }
+        
+        // New commands for the buttons
+        public ICommand PreviewEditCommand { get; }
+        public ICommand ImportCommand { get; }
+        public ICommand ExportCommand { get; }
+        
         public ViewSchedule SelectedSchedule
         {
             get => _selectedSchedule;
@@ -53,7 +59,7 @@ namespace RevitScheduleEditor
             {
                 _selectedSchedule = value;
                 OnPropertyChanged();
-                LoadScheduleData(null);
+                // Don't auto-load data anymore - user needs to click Preview/Edit
             }
         }
         
@@ -80,6 +86,11 @@ namespace RevitScheduleEditor
             RedoCommand = new RelayCommand(ExecuteRedo, CanExecuteRedo);
             FillDownCommand = new RelayCommand(ExecuteFillDown, CanExecuteFillDown);
             FillRightCommand = new RelayCommand(ExecuteFillRight, CanExecuteFillRight);
+            
+            // New commands
+            PreviewEditCommand = new RelayCommand(ExecutePreviewEdit, CanExecutePreviewEdit);
+            ImportCommand = new RelayCommand(ExecuteImport, CanExecuteImport);
+            ExportCommand = new RelayCommand(ExecuteExport, CanExecuteExport);
 
             LoadSchedules();
         }
@@ -92,6 +103,7 @@ namespace RevitScheduleEditor
                 .Where(s => !s.IsTemplate && s.ViewType == ViewType.Schedule)
                 .OrderBy(s => s.Name)
                 .ToList();
+            
             Schedules.Clear();
             foreach (var s in schedules)
             {
@@ -553,6 +565,204 @@ namespace RevitScheduleEditor
             }
             return null;
         }
+
+        #region New Commands Implementation
+
+        // Preview/Edit Command
+        private void ExecutePreviewEdit(object parameter)
+        {
+            if (SelectedSchedule == null)
+            {
+                MessageBox.Show("Please select a schedule first.", "No Schedule Selected", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            
+            try
+            {
+                LoadScheduleData(null);
+                MessageBox.Show($"Successfully loaded {ScheduleData.Count} items from schedule '{SelectedSchedule.Name}'.", "Data Loaded", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error loading schedule data: {ex.Message}", "Load Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private bool CanExecutePreviewEdit(object parameter)
+        {
+            return SelectedSchedule != null;
+        }
+
+        // Import Command
+        private void ExecuteImport(object parameter)
+        {
+            try
+            {
+                var openFileDialog = new Microsoft.Win32.OpenFileDialog
+                {
+                    Filter = "CSV files (*.csv)|*.csv|Excel files (*.xlsx)|*.xlsx|All files (*.*)|*.*",
+                    Title = "Select CSV or Excel file to import"
+                };
+
+                if (openFileDialog.ShowDialog() == true)
+                {
+                    ImportFromExcel(openFileDialog.FileName);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error importing data: {ex.Message}", "Import Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private bool CanExecuteImport(object parameter)
+        {
+            return SelectedSchedule != null && ScheduleData.Count > 0;
+        }
+
+        // Export Command
+        private void ExecuteExport(object parameter)
+        {
+            try
+            {
+                if (ScheduleData.Count == 0)
+                {
+                    MessageBox.Show("No data to export.", "No Data", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                var saveFileDialog = new Microsoft.Win32.SaveFileDialog
+                {
+                    Filter = "Excel files (*.xlsx)|*.xlsx",
+                    Title = "Save Excel file",
+                    FileName = $"{SelectedSchedule?.Name ?? "Schedule"}_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx"
+                };
+
+                if (saveFileDialog.ShowDialog() == true)
+                {
+                    ExportToExcel(saveFileDialog.FileName);
+                    MessageBox.Show("Data exported successfully!", "Export Complete", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error exporting data: {ex.Message}", "Export Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private bool CanExecuteExport(object parameter)
+        {
+            return ScheduleData.Count > 0;
+        }
+
+        #endregion
+
+        #region Excel Import/Export Implementation
+
+        private void ImportFromExcel(string filePath)
+        {
+            try
+            {
+                // Simple CSV import implementation
+                var lines = System.IO.File.ReadAllLines(filePath);
+                if (lines.Length < 2)
+                {
+                    MessageBox.Show("File must contain header and at least one data row.", "Invalid File", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                var headers = lines[0].Split(',');
+                var elementIdIndex = Array.FindIndex(headers, h => h.Trim().Equals("Element ID", StringComparison.OrdinalIgnoreCase));
+                
+                if (elementIdIndex == -1)
+                {
+                    MessageBox.Show("File must contain 'Element ID' column.", "Missing Element ID", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                int updatedCount = 0;
+                SaveStateForUndo(); // Save state before import
+
+                for (int i = 1; i < lines.Length; i++)
+                {
+                    var values = lines[i].Split(',');
+                    if (values.Length <= elementIdIndex) continue;
+
+                    var elementIdStr = values[elementIdIndex].Trim();
+                    if (!long.TryParse(elementIdStr, out long elementId)) continue;
+
+                    // Find matching row
+                    var scheduleRow = ScheduleData.FirstOrDefault(row => row.GetElement().Id.IntegerValue == elementId);
+                    if (scheduleRow == null) continue;
+
+                    // Update values
+                    for (int j = 0; j < headers.Length && j < values.Length; j++)
+                    {
+                        if (j == elementIdIndex) continue; // Skip Element ID column
+
+                        var columnName = headers[j].Trim();
+                        var newValue = values[j].Trim();
+                        
+                        if (scheduleRow.Values.ContainsKey(columnName))
+                        {
+                            scheduleRow[columnName] = newValue;
+                        }
+                    }
+                    updatedCount++;
+                }
+
+                MessageBox.Show($"Successfully imported data for {updatedCount} elements.", "Import Complete", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error reading file: {ex.Message}", "Import Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void ExportToExcel(string filePath)
+        {
+            try
+            {
+                var lines = new List<string>();
+                
+                // Get visible fields for headers
+                var visibleFields = SelectedSchedule.Definition.GetFieldOrder()
+                    .Select(id => SelectedSchedule.Definition.GetField(id))
+                    .Where(f => !f.IsHidden).ToList();
+
+                // Create header line
+                var headers = new List<string> { "Element ID" };
+                headers.AddRange(visibleFields.Select(f => f.GetName()));
+                lines.Add(string.Join(",", headers.Select(h => $"\"{h}\"")));
+
+                // Create data lines
+                foreach (var row in ScheduleData)
+                {
+                    var values = new List<string> { row.GetElement().Id.IntegerValue.ToString() };
+                    
+                    foreach (var field in visibleFields)
+                    {
+                        var fieldName = field.GetName();
+                        var value = row.Values.ContainsKey(fieldName) ? row.Values[fieldName] : "";
+                        values.Add($"\"{value}\"");
+                    }
+                    
+                    lines.Add(string.Join(",", values));
+                }
+
+                // Write to file (CSV format for simplicity)
+                var csvPath = System.IO.Path.ChangeExtension(filePath, ".csv");
+                System.IO.File.WriteAllLines(csvPath, lines);
+                
+                MessageBox.Show($"Data exported to: {csvPath}\n\nNote: File saved as CSV format for compatibility.", "Export Complete", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error writing file: {ex.Message}", "Export Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        #endregion
 
         #endregion
     }
