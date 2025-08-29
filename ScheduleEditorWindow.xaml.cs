@@ -198,6 +198,21 @@ namespace RevitScheduleEditor
         // Event handler for integrated filter buttons in column headers
         private void FilterButton_Click(object sender, RoutedEventArgs e)
         {
+            // Cancel any active edit operations first
+            var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
+            if (dataGrid != null)
+            {
+                try
+                {
+                    dataGrid.CancelEdit();
+                    dataGrid.CommitEdit();
+                }
+                catch
+                {
+                    // Ignore edit cancellation errors
+                }
+            }
+
             var button = sender as Button;
             if (button == null) return;
 
@@ -341,6 +356,14 @@ namespace RevitScheduleEditor
         {
             try
             {
+                // Cancel any current edit operations before applying filter
+                var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
+                if (dataGrid != null)
+                {
+                    dataGrid.CancelEdit();
+                    dataGrid.CommitEdit();
+                }
+
                 // Get selected values (skip "Select All" checkbox and separator)
                 var selectedValues = listBox.Items.OfType<CheckBox>()
                     .Where(cb => cb.Content.ToString() != "(Select All)")
@@ -383,12 +406,27 @@ namespace RevitScheduleEditor
                 // Update column header appearance
                 UpdateColumnHeaderAppearance(columnName, hasFilter);
 
-                // Apply all filters
+                // Apply all filters with proper synchronization
                 var collectionView = CollectionViewSource.GetDefaultView(_viewModel.ScheduleData);
-                collectionView.Filter = FilterPredicate;
-                collectionView.Refresh();
                 
-                System.Diagnostics.Debug.WriteLine($"After filter: {collectionView.Cast<object>().Count()} items visible");
+                // Use Dispatcher to ensure UI is not in edit mode
+                this.Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    try
+                    {
+                        collectionView.Filter = FilterPredicate;
+                        collectionView.Refresh();
+                        System.Diagnostics.Debug.WriteLine($"After filter: {collectionView.Cast<object>().Count()} items visible");
+                    }
+                    catch (Exception filterEx)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"Filter application error: {filterEx.Message}");
+                        // If filter fails, clear all filters and show all data
+                        collectionView.Filter = null;
+                        collectionView.Refresh();
+                    }
+                }), System.Windows.Threading.DispatcherPriority.Background);
+                
             }
             catch (Exception ex)
             {

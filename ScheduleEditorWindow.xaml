@@ -291,7 +291,7 @@
             </DataGrid.ContextMenu>
         </DataGrid>
 
-        <Button Grid.Row="3" 
+        <Button Grid.Row="2" 
                 Content="Update Model" 
                 Margin="5" 
                 HorizontalAlignment="Right"
