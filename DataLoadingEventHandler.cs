@@ -43,6 +43,10 @@ namespace RevitScheduleEditor
                             case DataLoadingRequestType.LoadElementBatch:
                                 ProcessLoadElementBatch(doc, request);
                                 break;
+                                
+                            case DataLoadingRequestType.LoadAllElementsWithData:
+                                ProcessLoadAllElementsWithData(doc, request);
+                                break;
                         }
                     }
                 }
@@ -127,6 +131,63 @@ namespace RevitScheduleEditor
             DataLoadingCompleted?.Invoke(this, new DataLoadingCompletedEventArgs(result));
         }
 
+        private void ProcessLoadAllElementsWithData(Document doc, DataLoadingRequest request)
+        {
+            DebugLog($"Loading all elements with data for schedule: {request.Schedule.Name}");
+            
+            var stopwatch = Stopwatch.StartNew();
+            var scheduleRows = new List<ScheduleRow>();
+            
+            // Bước 1: Lấy tất cả ElementId
+            var collector = new FilteredElementCollector(doc, request.Schedule.Id)
+                .WhereElementIsNotElementType();
+            var elementIds = collector.ToElementIds().ToList();
+            
+            DebugLog($"Found {elementIds.Count} elements, now loading data...");
+            
+            // Bước 2: Load data của tất cả elements luôn
+            var visibleFields = request.Schedule.Definition.GetFieldOrder()
+                .Select(id => request.Schedule.Definition.GetField(id))
+                .Where(f => !f.IsHidden).ToList();
+            
+            foreach (var elementId in elementIds)
+            {
+                try
+                {
+                    Element elem = doc.GetElement(elementId);
+                    if (elem == null) continue;
+                    
+                    var scheduleRow = new ScheduleRow(elem);
+                    foreach (var field in visibleFields)
+                    {
+                        Parameter param = GetParameterFromField(elem, field);
+                        string value = param != null ? param.AsValueString() ?? param.AsString() ?? string.Empty : string.Empty;
+                        scheduleRow.AddValue(field.GetName(), value);
+                    }
+                    scheduleRows.Add(scheduleRow);
+                }
+                catch (Exception ex)
+                {
+                    DebugLog($"Error processing element {elementId}: {ex.Message}");
+                }
+            }
+            
+            stopwatch.Stop();
+            DebugLog($"Loaded all elements: {scheduleRows.Count} rows in {stopwatch.ElapsedMilliseconds}ms");
+            
+            var result = new DataLoadingResult
+            {
+                RequestType = request.RequestType,
+                ElementIds = elementIds,
+                ScheduleRows = scheduleRows,
+                Schedule = request.Schedule,
+                BatchIndex = 0,
+                ProcessingTime = stopwatch.Elapsed
+            };
+            
+            DataLoadingCompleted?.Invoke(this, new DataLoadingCompletedEventArgs(result));
+        }
+
         private Parameter GetParameterFromField(Element element, ScheduleField field)
         {
             try
@@ -172,7 +233,8 @@ namespace RevitScheduleEditor
     public enum DataLoadingRequestType
     {
         GetAllElementIds,
-        LoadElementBatch
+        LoadElementBatch,
+        LoadAllElementsWithData // Mới: Load tất cả element với data luôn (cho < 1000 elements)
     }
 
     /// <summary>

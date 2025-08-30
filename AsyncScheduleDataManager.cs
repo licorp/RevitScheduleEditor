@@ -22,8 +22,9 @@ namespace RevitScheduleEditor
         private readonly Dispatcher _dispatcher;
 
         // Cấu hình batch loading
-        private const int INITIAL_BATCH_SIZE = 200;  // Số lượng elements tải ban đầu
-        private const int BACKGROUND_BATCH_SIZE = 500; // Số lượng elements tải trong mỗi batch nền
+        private const int ELEMENT_COUNT_THRESHOLD = 1000; // Ngưỡng để quyết định có dùng batch loading không
+        private const int INITIAL_BATCH_SIZE = 200;  // Số lượng elements tải ban đầu (không dùng nữa)
+        private const int BACKGROUND_BATCH_SIZE = 50; // Số lượng elements tải trong mỗi batch nền (giảm xuống 50)
         
         // Dữ liệu và trạng thái
         private List<ElementId> _allElementIds;
@@ -130,9 +131,9 @@ namespace RevitScheduleEditor
                 LoadedElements = 0;
                 LoadingStatus = "Initializing...";
 
-                // Bước 1: Lấy tất cả ElementId trước (nhanh)
-                DebugLog("Step 1: Getting all element IDs");
-                LoadingStatus = "Getting element list...";
+                // Bước 1: Lấy tất cả ElementId trước để đếm số lượng (nhanh)
+                DebugLog("Step 1: Getting element count to determine loading strategy");
+                LoadingStatus = "Checking element count...";
                 
                 var request = new DataLoadingRequest
                 {
@@ -170,6 +171,10 @@ namespace RevitScheduleEditor
                         case DataLoadingRequestType.LoadElementBatch:
                             HandleBatchLoaded(result);
                             break;
+                            
+                        case DataLoadingRequestType.LoadAllElementsWithData:
+                            HandleAllElementsLoaded(result);
+                            break;
                     }
                 }
                 catch (Exception ex)
@@ -197,8 +202,29 @@ namespace RevitScheduleEditor
                 return;
             }
 
-            // Bước 2: Tải batch đầu tiên (để hiển thị ngay)
-            LoadNextBatch(0, INITIAL_BATCH_SIZE);
+            // Kiểm tra số lượng element để quyết định cách load
+            if (TotalElements < ELEMENT_COUNT_THRESHOLD)
+            {
+                // Nếu dưới 1000 element: load thẳng luôn tất cả (không cần lưu ElementIds)
+                DebugLog($"Element count ({TotalElements}) is below threshold ({ELEMENT_COUNT_THRESHOLD}). Loading all elements with data at once.");
+                LoadingStatus = "Loading all elements with data...";
+                
+                var request = new DataLoadingRequest
+                {
+                    RequestType = DataLoadingRequestType.LoadAllElementsWithData,
+                    Schedule = _currentSchedule
+                };
+                
+                _eventHandler.QueueRequest(request);
+                _externalEvent.Raise();
+            }
+            else
+            {
+                // Nếu trên hoặc bằng 1000 element: load từng batch 50 element
+                DebugLog($"Element count ({TotalElements}) is above threshold ({ELEMENT_COUNT_THRESHOLD}). Using batch loading with size {BACKGROUND_BATCH_SIZE}.");
+                LoadingStatus = "Loading elements in batches...";
+                LoadNextBatch(0, BACKGROUND_BATCH_SIZE); // Load batch đầu tiên 50 element
+            }
         }
 
         private void HandleBatchLoaded(DataLoadingResult result)
@@ -254,6 +280,28 @@ namespace RevitScheduleEditor
 
             _eventHandler.QueueRequest(request);
             _externalEvent.Raise();
+        }
+
+        private void HandleAllElementsLoaded(DataLoadingResult result)
+        {
+            // Xử lý khi load tất cả element với data trong một lần (cho < 1000 elements)
+            var allRows = result.ScheduleRows;
+            var elementIds = result.ElementIds;
+            
+            _allElementIds = elementIds; // Lưu ElementIds sau khi load xong data
+            _loadedRows.AddRange(allRows);
+            LoadedElements = allRows.Count;
+            TotalElements = elementIds.Count; // Cập nhật lại total nếu cần
+            
+            DebugLog($"All elements loaded: {allRows.Count} rows");
+            LoadingStatus = $"Completed! Loaded {LoadedElements} elements";
+
+            // Thông báo có tất cả data được tải
+            BatchLoaded?.Invoke(this, new BatchLoadedEventArgs(allRows, LoadedElements, TotalElements));
+            
+            // Hoàn thành
+            IsLoading = false;
+            LoadingCompleted?.Invoke(this, EventArgs.Empty);
         }
 
         public void CancelLoading()
