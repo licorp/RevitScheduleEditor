@@ -30,9 +30,6 @@ namespace RevitScheduleEditor
         private List<Dictionary<string, string>> _undoHistory;
         private List<Dictionary<string, string>> _redoHistory;
         private const int MaxHistorySize = 50;
-
-        // Async loading manager - Cải tiến hiệu năng như SheetLink
-        private AsyncScheduleDataManager _asyncDataManager;
         
         // Progress tracking properties
         private bool _isLoadingData;
@@ -151,20 +148,10 @@ namespace RevitScheduleEditor
                 _doc = doc;
                 DebugLog($"Document assigned: {doc.Title}");
                 
-                // Tạo UIApplication để truyền cho AsyncScheduleDataManager
-                _uiApp = new UIApplication(doc.Application);
-                
                 _allScheduleData = new List<ScheduleRow>();
                 Schedules = new ObservableCollection<ViewSchedule>();
                 ScheduleData = new ObservableCollection<ScheduleRow>();
                 DebugLog("Collections initialized");
-                
-                // Khởi tạo Async Data Manager cho hiệu năng cao
-                _asyncDataManager = new AsyncScheduleDataManager(_uiApp);
-                _asyncDataManager.PropertyChanged += OnAsyncDataManagerPropertyChanged;
-                _asyncDataManager.BatchLoaded += OnBatchLoaded;
-                _asyncDataManager.LoadingCompleted += OnLoadingCompleted;
-                DebugLog("AsyncScheduleDataManager initialized");
                 
                 // Initialize history
                 _undoHistory = new List<Dictionary<string, string>>();
@@ -232,61 +219,10 @@ namespace RevitScheduleEditor
             }
         }
 
-        // Event handlers cho AsyncScheduleDataManager
-        private void OnAsyncDataManagerPropertyChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e)
-        {
-            switch (e.PropertyName)
-            {
-                case nameof(AsyncScheduleDataManager.IsLoading):
-                    IsLoadingData = _asyncDataManager.IsLoading;
-                    break;
-                case nameof(AsyncScheduleDataManager.LoadingStatus):
-                    LoadingStatus = _asyncDataManager.LoadingStatus;
-                    break;
-                case nameof(AsyncScheduleDataManager.LoadingProgress):
-                    LoadingProgress = _asyncDataManager.LoadingProgress;
-                    break;
-                case nameof(AsyncScheduleDataManager.TotalElements):
-                    TotalElements = _asyncDataManager.TotalElements;
-                    break;
-                case nameof(AsyncScheduleDataManager.LoadedElements):
-                    LoadedElements = _asyncDataManager.LoadedElements;
-                    break;
-            }
-        }
-
-        private void OnBatchLoaded(object sender, BatchLoadedEventArgs e)
-        {
-            DebugLog($"Batch loaded: {e.NewRows.Count} new rows, Total: {e.TotalLoadedElements}/{e.TotalElements}");
-            
-            // Thêm rows mới vào ScheduleData (có thể cần dispatch về UI thread)
-            Application.Current.Dispatcher.BeginInvoke(new Action(() =>
-            {
-                foreach (var row in e.NewRows)
-                {
-                    ScheduleData.Add(row);
-                    _allScheduleData.Add(row);
-                }
-                
-                // Notify UI
-                OnPropertyChanged(nameof(ScheduleData));
-            }));
-        }
-
-        private void OnLoadingCompleted(object sender, EventArgs e)
-        {
-            DebugLog("All data loading completed");
-            Application.Current.Dispatcher.BeginInvoke(new Action(() =>
-            {
-                LoadingStatus = $"Completed! Loaded {LoadedElements} elements";
-                // Có thể thêm logic khác khi hoàn thành tải dữ liệu
-            }));
-        }
-
         // Command methods
         private void ExecutePreviewEdit(object obj)
         {
-            DebugLog("ExecutePreviewEdit called - Using async loading for better performance");
+            DebugLog("ExecutePreviewEdit called - Loading schedule data");
             
             if (SelectedSchedule == null)
             {
@@ -298,8 +234,8 @@ namespace RevitScheduleEditor
             ScheduleData.Clear();
             _allScheduleData.Clear();
             
-            // Start async loading like SheetLink
-            _asyncDataManager.LoadScheduleAsync(SelectedSchedule);
+            // Use the proven stable loading method
+            LoadScheduleData();
         }
 
         private bool CanExecutePreviewEdit(object obj)
@@ -310,7 +246,37 @@ namespace RevitScheduleEditor
         private void ExecuteCancelLoading(object obj)
         {
             DebugLog("User cancelled data loading");
-            _asyncDataManager.CancelLoading();
+            IsLoadingData = false;
+            LoadingStatus = "Loading cancelled by user";
+        }
+
+        private void ExecuteResumeLoading(object obj)
+        {
+            DebugLog("User requested to resume loading");
+            if (SelectedSchedule != null && !IsLoadingData)
+            {
+                // Resume chunked loading from current position
+                var collector = new FilteredElementCollector(_doc, SelectedSchedule.Id).WhereElementIsNotElementType();
+                var elements = collector.ToElements();
+                
+                var visibleFields = SelectedSchedule.Definition.GetFieldOrder()
+                    .Select(id => SelectedSchedule.Definition.GetField(id))
+                    .Where(f => !f.IsHidden).ToList();
+                
+                // Calculate resume position based on current loaded data
+                int resumeFromIndex = _allScheduleData.Count;
+                if (resumeFromIndex < elements.Count)
+                {
+                    DebugLog($"Resuming loading from element {resumeFromIndex}");
+                    var remainingElements = elements.Skip(resumeFromIndex).ToList();
+                    LoadScheduleDataInChunks(remainingElements, visibleFields, resumeFromIndex);
+                }
+                else
+                {
+                    LoadingStatus = "All elements already loaded";
+                    DebugLog("All elements already loaded");
+                }
+            }
         }
 
         private bool CanExecuteCancelLoading(object obj)
@@ -318,7 +284,7 @@ namespace RevitScheduleEditor
             return IsLoadingData;
         }
 
-        private void LoadScheduleData(object obj)
+        private void LoadScheduleData()
         {
             DebugLog("=== LoadScheduleData Started ===");
             
@@ -358,26 +324,26 @@ namespace RevitScheduleEditor
                     return;
                 }
                 
-                // Check for large datasets and warn user
-                if (elements.Count > 5000)
+                var visibleFields = SelectedSchedule.Definition.GetFieldOrder()
+                    .Select(id => SelectedSchedule.Definition.GetField(id))
+                    .Where(f => !f.IsHidden).ToList();
+
+                DebugLog($"Found {visibleFields.Count} visible fields");
+
+                // Check for large datasets and decide loading strategy
+                if (elements.Count > 1000)
                 {
-                    var result = MessageBox.Show($"This schedule contains {elements.Count} items. Loading large datasets may take time and consume memory.\n\nDo you want to continue?", 
-                        "Large Dataset Warning", MessageBoxButton.YesNo, MessageBoxImage.Warning);
-                    if (result == MessageBoxResult.No)
+                    var result = MessageBox.Show($"This schedule contains {elements.Count} items. Do you want to use chunked loading for better responsiveness?\n\nYes = Load in chunks (50 elements at a time)\nNo = Load all at once", 
+                        "Large Schedule Loading", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                    if (result == MessageBoxResult.Yes)
                     {
-                        LoadingStatus = "Loading cancelled by user";
+                        LoadScheduleDataInChunks(elements.ToList(), visibleFields);
                         return;
                     }
                 }
 
                 LoadingStatus = $"Loading {elements.Count} elements...";
                 LoadingProgress = 10;
-
-                var visibleFields = SelectedSchedule.Definition.GetFieldOrder()
-                    .Select(id => SelectedSchedule.Definition.GetField(id))
-                    .Where(f => !f.IsHidden).ToList();
-
-                DebugLog($"Found {visibleFields.Count} visible fields");
                 LoadingProgress = 20;
 
                 int processedCount = 0;
@@ -481,6 +447,149 @@ namespace RevitScheduleEditor
                 _allScheduleData.Clear();
                 ScheduleData.Clear();
             }
+        }
+
+        private void LoadScheduleDataInChunks(List<Element> elements, List<ScheduleField> visibleFields, int startFromIndex = 0)
+        {
+            DebugLog($"Starting chunked loading for {elements.Count} elements from index {startFromIndex}");
+            
+            const int CHUNK_SIZE = 50; // Load 50 elements at a time
+            
+            // Clear existing data only if starting from beginning
+            if (startFromIndex == 0)
+            {
+                ScheduleData.Clear();
+                _allScheduleData.Clear();
+            }
+            
+            // Set initial status
+            IsLoadingData = true;
+            LoadingStatus = "Preparing chunked loading...";
+            
+            // Calculate total elements for progress tracking
+            var collector = new FilteredElementCollector(_doc, SelectedSchedule.Id).WhereElementIsNotElementType();
+            var totalElements = collector.ToElements().Count;
+            
+            LoadingProgress = (double)startFromIndex / totalElements * 100;
+            
+            int currentIndex = 0;
+            var timer = new System.Windows.Threading.DispatcherTimer();
+            timer.Interval = TimeSpan.FromMilliseconds(100); // 100ms delay between chunks for UI responsiveness
+            
+            timer.Tick += (sender, e) =>
+            {
+                try
+                {
+                    int endIndex = Math.Min(currentIndex + CHUNK_SIZE, elements.Count);
+                    DebugLog($"Loading chunk: elements {currentIndex} to {endIndex - 1}");
+                    
+                    int successfulInChunk = 0;
+                    // Process current chunk
+                    for (int i = currentIndex; i < endIndex; i++)
+                    {
+                        var elem = elements[i];
+                        
+                        try
+                        {
+                            if (elem == null || !elem.IsValidObject) 
+                            {
+                                DebugLog($"Skipping invalid element at index {i}");
+                                continue;
+                            }
+
+                            var scheduleRow = new ScheduleRow(elem);
+                            
+                            foreach (var field in visibleFields)
+                            {
+                                try
+                                {
+                                    Parameter param = GetParameterFromField(elem, field);
+                                    string value = string.Empty;
+                                    
+                                    if (param != null)
+                                    {
+                                        // Safe parameter value extraction
+                                        try
+                                        {
+                                            value = param.AsValueString() ?? param.AsString() ?? string.Empty;
+                                        }
+                                        catch (Exception paramEx)
+                                        {
+                                            DebugLog($"Parameter access error for {field.GetName()}: {paramEx.Message}");
+                                            value = string.Empty; // Fallback for inaccessible parameters
+                                        }
+                                    }
+                                    
+                                    scheduleRow.AddValue(field.GetName(), value);
+                                }
+                                catch (Exception fieldEx)
+                                {
+                                    // Log field error but continue processing
+                                    DebugLog($"Error processing field {field.GetName()}: {fieldEx.Message}");
+                                    scheduleRow.AddValue(field.GetName(), string.Empty);
+                                }
+                            }
+                            
+                            _allScheduleData.Add(scheduleRow);
+                            ScheduleData.Add(scheduleRow); // Add to UI immediately for progressive display
+                            successfulInChunk++;
+                        }
+                        catch (Exception elemEx)
+                        {
+                            // Log element error but continue processing other elements
+                            DebugLog($"Error processing element {elem?.Id} at index {i}: {elemEx.Message}");
+                            continue;
+                        }
+                    }
+                    
+                    // Update progress
+                    currentIndex = endIndex;
+                    int totalProcessed = startFromIndex + currentIndex;
+                    LoadingProgress = (double)totalProcessed / totalElements * 100;
+                    LoadingStatus = $"Loaded {totalProcessed}/{totalElements} elements... ({successfulInChunk} successful in this chunk)";
+                    DebugLog($"Chunk completed: {totalProcessed}/{totalElements} elements processed, {successfulInChunk} successful, UI showing {ScheduleData.Count} rows");
+                    
+                    // Force UI update after each chunk
+                    OnPropertyChanged(nameof(ScheduleData));
+                    
+                    // Check if we should continue or stop
+                    if (currentIndex >= elements.Count)
+                    {
+                        timer.Stop();
+                        IsLoadingData = false;
+                        LoadingStatus = $"Completed: {ScheduleData.Count} elements loaded";
+                        LoadingProgress = 100;
+                        DebugLog($"Chunked loading completed successfully: {ScheduleData.Count} total elements");
+                        
+                        // Final UI update
+                        OnPropertyChanged(nameof(ScheduleData));
+                    }
+                    else if (!IsLoadingData) // Check if loading was cancelled
+                    {
+                        timer.Stop();
+                        DebugLog("Loading was cancelled by user");
+                        LoadingStatus = "Loading cancelled";
+                    }
+                }
+                catch (Exception ex)
+                {
+                    DebugLog($"CRITICAL ERROR in chunk processing: {ex.Message}\nStackTrace: {ex.StackTrace}");
+                    LoadingStatus = $"Error in chunk {currentIndex}: {ex.Message}";
+                    
+                    // Try to continue with next chunk instead of stopping completely
+                    currentIndex = Math.Min(currentIndex + CHUNK_SIZE, elements.Count);
+                    if (currentIndex >= elements.Count)
+                    {
+                        timer.Stop();
+                        IsLoadingData = false;
+                        LoadingStatus = $"Completed with errors: {ScheduleData.Count} elements loaded";
+                        DebugLog("Chunked loading completed with errors");
+                    }
+                }
+            };
+            
+            DebugLog("Starting chunked loading timer");
+            timer.Start();
         }
 
         private void ExecuteAutofill(object parameter)
