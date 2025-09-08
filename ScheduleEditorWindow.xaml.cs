@@ -292,101 +292,39 @@ namespace RevitScheduleEditor
 
             if (uniqueValues.Count == 0) return;
 
-            // Create popup with checkboxes
-            var popup = new System.Windows.Controls.Primitives.Popup();
-            var listBox = new ListBox
+            // Get current filter values for this column
+            var currentFilters = _columnFilters.ContainsKey(columnName) 
+                ? _columnFilters[columnName].ToList() 
+                : uniqueValues;
+
+            // Show Text Filters Window
+            var filterWindow = new TextFiltersWindow(columnName, uniqueValues, currentFilters)
             {
-                Width = 200,
-                MaxHeight = 300,
-                Background = Brushes.White,
-                BorderBrush = Brushes.Gray,
-                BorderThickness = new Thickness(1)
+                Owner = this
             };
 
-            // Add "Select All" option
-            var selectAllItem = new CheckBox
+            if (filterWindow.ShowDialog() == true)
             {
-                Content = "(Select All)",
-                IsChecked = true,
-                Margin = new Thickness(2)
-            };
-            
-            selectAllItem.Checked += (s, e) => 
-            {
-                foreach (CheckBox cb in listBox.Items.OfType<CheckBox>().Skip(1))
-                    cb.IsChecked = true;
-            };
-            
-            selectAllItem.Unchecked += (s, e) => 
-            {
-                foreach (CheckBox cb in listBox.Items.OfType<CheckBox>().Skip(1))
-                    cb.IsChecked = false;
-            };
-
-            listBox.Items.Add(selectAllItem);
-
-            // Add separator
-            listBox.Items.Add(new Separator());
-
-            // Add value checkboxes
-            foreach (var value in uniqueValues)
-            {
-                var checkBox = new CheckBox
+                // Apply the selected filters
+                var selectedValues = filterWindow.SelectedValues;
+                
+                if (selectedValues.Count == uniqueValues.Count)
                 {
-                    Content = value,
-                    IsChecked = true,
-                    Margin = new Thickness(2)
-                };
-                listBox.Items.Add(checkBox);
+                    // All items selected - remove filter
+                    _columnFilters.Remove(columnName);
+                }
+                else
+                {
+                    // Some items selected - apply filter
+                    _columnFilters[columnName] = new HashSet<string>(selectedValues);
+                }
+
+                // Update the column header visual to show filter status
+                UpdateColumnHeaderFilterStatus(columnName, _columnFilters.ContainsKey(columnName));
+                
+                // Apply all filters to refresh the view
+                ApplyFilters();
             }
-
-            // Add OK/Cancel buttons
-            var buttonPanel = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                HorizontalAlignment = HorizontalAlignment.Right,
-                Margin = new Thickness(5)
-            };
-
-            var okButton = new Button
-            {
-                Content = "OK",
-                Width = 50,
-                Margin = new Thickness(2),
-                IsDefault = true
-            };
-
-            var cancelButton = new Button
-            {
-                Content = "Cancel",
-                Width = 50,
-                Margin = new Thickness(2),
-                IsCancel = true
-            };
-
-            okButton.Click += (s, e) =>
-            {
-                ApplyColumnFilter(columnName, listBox);
-                popup.IsOpen = false;
-            };
-
-            cancelButton.Click += (s, e) =>
-            {
-                popup.IsOpen = false;
-            };
-
-            buttonPanel.Children.Add(okButton);
-            buttonPanel.Children.Add(cancelButton);
-
-            var stackPanel = new StackPanel();
-            stackPanel.Children.Add(listBox);
-            stackPanel.Children.Add(buttonPanel);
-
-            popup.Child = stackPanel;
-            popup.PlacementTarget = button;
-            popup.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
-            popup.StaysOpen = false;
-            popup.IsOpen = true;
         }
 
         private void ApplyColumnFilter(string columnName, ListBox listBox)
@@ -990,6 +928,73 @@ namespace RevitScheduleEditor
             Copy,
             Numeric,
             TextWithNumber
+        }
+
+        // Method to update column header visual state for filters
+        private void UpdateColumnHeaderFilterStatus(string columnName, bool hasFilter)
+        {
+            var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
+            if (dataGrid == null) return;
+
+            var column = dataGrid.Columns.FirstOrDefault(c => c.Header?.ToString() == columnName);
+            if (column == null) return;
+
+            // Update the column header's Tag property to indicate filter status
+            // This will trigger the DataTrigger in XAML to change visual appearance
+            if (column.HeaderTemplate?.LoadContent() is FrameworkElement headerContent)
+            {
+                headerContent.Tag = hasFilter ? "HasFilter" : null;
+            }
+        }
+
+        // Method to apply all active filters to the data
+        private void ApplyFilters()
+        {
+            if (_viewModel?.ScheduleData == null) return;
+
+            try
+            {
+                var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
+                if (dataGrid == null) return;
+
+                // Create filtered collection
+                var filteredData = _viewModel.ScheduleData.AsEnumerable();
+
+                foreach (var filter in _columnFilters)
+                {
+                    string columnName = filter.Key;
+                    var allowedValues = filter.Value;
+
+                    filteredData = filteredData.Where(row =>
+                    {
+                        string cellValue = "";
+                        
+                        if (columnName == "Element ID")
+                        {
+                            cellValue = row.GetElement().Id.IntegerValue.ToString();
+                        }
+                        else if (row.Values.ContainsKey(columnName))
+                        {
+                            cellValue = row.Values[columnName];
+                        }
+
+                        return allowedValues.Contains(cellValue);
+                    });
+                }
+
+                // Update DataGrid's ItemsSource
+                dataGrid.ItemsSource = filteredData.ToList();
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"Error applying filters: {ex.Message}");
+                // On error, show all data
+                var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
+                if (dataGrid != null)
+                {
+                    dataGrid.ItemsSource = _viewModel.ScheduleData;
+                }
+            }
         }
     }
 }
