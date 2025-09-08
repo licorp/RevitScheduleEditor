@@ -22,18 +22,7 @@ namespace RevitScheduleEditor
         private readonly UIApplication _uiApp;
         private ViewSchedule _selectedSchedule;
         public ObservableCollection<ViewSchedule> Schedules { get; set; }
-        
-        // Use ObservableCollection base to support both Virtual and Progressive collections
-        private ObservableCollection<ScheduleRow> _scheduleData;
-        public ObservableCollection<ScheduleRow> ScheduleData 
-        { 
-            get => _scheduleData;
-            set
-            {
-                _scheduleData = value;
-                OnPropertyChanged();
-            }
-        }
+        public ObservableCollection<ScheduleRow> ScheduleData { get; set; }
         
         private List<ScheduleRow> _allScheduleData;
         private string _searchText;
@@ -56,41 +45,6 @@ namespace RevitScheduleEditor
         private bool _isVirtualScrollingEnabled = true;
         private const int VIRTUAL_SCROLL_THRESHOLD = 500;
         private const int CHUNK_SIZE = 25; // Reduced chunk size for better responsiveness
-        
-        // Progressive loading properties
-        private bool _isBackgroundLoading;
-        private string _backgroundLoadingStatus;
-        private bool _hasMoreDataToLoad;
-
-        public bool IsBackgroundLoading
-        {
-            get => _isBackgroundLoading;
-            set
-            {
-                _isBackgroundLoading = value;
-                OnPropertyChanged(nameof(IsBackgroundLoading));
-            }
-        }
-
-        public string BackgroundLoadingStatus
-        {
-            get => _backgroundLoadingStatus;
-            set
-            {
-                _backgroundLoadingStatus = value;
-                OnPropertyChanged(nameof(BackgroundLoadingStatus));
-            }
-        }
-
-        public bool HasMoreDataToLoad
-        {
-            get => _hasMoreDataToLoad;
-            set
-            {
-                _hasMoreDataToLoad = value;
-                OnPropertyChanged(nameof(HasMoreDataToLoad));
-            }
-        }
 
         // Debug logging methods
         private void DebugLog(string message)
@@ -205,10 +159,8 @@ namespace RevitScheduleEditor
                 
                 _allScheduleData = new List<ScheduleRow>();
                 Schedules = new ObservableCollection<ViewSchedule>();
-                
-                // Initialize with null VirtualScheduleCollection - will be created when schedule is selected
-                ScheduleData = null;
-                DebugLog("Collections initialized - VirtualScheduleCollection will be created on demand");
+                ScheduleData = new ObservableCollection<ScheduleRow>();
+                DebugLog("Collections initialized");
                 
                 // Initialize history
                 _undoHistory = new List<Dictionary<string, string>>();
@@ -287,27 +239,13 @@ namespace RevitScheduleEditor
                 return;
             }
 
-            // Prevent recursive calls
-            if (IsLoadingData)
-            {
-                DebugLog("Already loading data - ignoring duplicate call");
-                return;
-            }
-
             // Cancel any existing loading operation
             _loadingCancellationTokenSource?.Cancel();
             _loadingCancellationTokenSource = new CancellationTokenSource();
 
-            // Clear current data safely
-            try
-            {
-                ScheduleData?.Clear();
-                _allScheduleData?.Clear();
-            }
-            catch (Exception ex)
-            {
-                DebugLog($"Error clearing data: {ex.Message}");
-            }
+            // Clear current data
+            ScheduleData.Clear();
+            _allScheduleData.Clear();
             
             // Use optimized async loading
             await LoadScheduleDataAsync(_loadingCancellationTokenSource.Token);
@@ -332,10 +270,9 @@ namespace RevitScheduleEditor
         }
 
         // NEW: Optimized async loading method
-        // NEW: Optimized async loading method with VirtualizingCollection
         private async Task LoadScheduleDataAsync(CancellationToken cancellationToken)
         {
-            DebugLog("=== LoadScheduleDataAsync Started (VirtualizingCollection) ===");
+            DebugLog("=== LoadScheduleDataAsync Started ===");
             
             if (SelectedSchedule == null) 
             {
@@ -346,13 +283,13 @@ namespace RevitScheduleEditor
 
             DebugLog($"Loading data for schedule: {SelectedSchedule.Name}");
             IsLoadingData = true;
-            LoadingStatus = "🚀 Initializing Virtual Data Loading...";
+            LoadingStatus = "Initializing...";
             LoadingProgress = 0;
             
             try
             {
                 // Step 1: Quick element count check
-                LoadingStatus = "📊 Analyzing schedule structure...";
+                LoadingStatus = "Counting elements...";
                 var collector = new FilteredElementCollector(_doc, SelectedSchedule.Id).WhereElementIsNotElementType();
                 var elementCount = collector.GetElementCount();
                 TotalElements = elementCount;
@@ -369,38 +306,28 @@ namespace RevitScheduleEditor
                 }
 
                 // Step 2: Get visible fields
-                LoadingStatus = "⚙️ Preparing data structure...";
+                LoadingStatus = "Analyzing schedule fields...";
                 var visibleFields = SelectedSchedule.Definition.GetFieldOrder()
                     .Select(id => SelectedSchedule.Definition.GetField(id))
                     .Where(f => !f.IsHidden).ToList();
 
                 DebugLog($"Found {visibleFields.Count} visible fields");
 
-                // Step 3: Use VirtualizingCollection for ALL schedules (small or large)
-                await LoadWithVirtualizationAsync(visibleFields, cancellationToken);
+                // Step 3: Choose loading strategy based on size
+                if (elementCount > VIRTUAL_SCROLL_THRESHOLD)
+                {
+                    await LoadLargeScheduleAsync(collector, visibleFields, cancellationToken);
+                }
+                else
+                {
+                    await LoadSmallScheduleAsync(collector, visibleFields, cancellationToken);
+                }
                 
                 if (!cancellationToken.IsCancellationRequested)
                 {
                     LoadingProgress = 100;
-                    LoadingStatus = $"✅ Ready! Virtual scrolling enabled for {elementCount:N0} elements";
-                    DebugLog($"Virtual data loading completed for {elementCount} elements");
-                    
-                    // Debug VirtualScheduleCollection status
-                    if (ScheduleData is VirtualScheduleCollection virtualCollection)
-                    {
-                        virtualCollection.DebugDataStatus();
-                        
-                        // Force a UI refresh after 1 second delay to ensure data is loaded
-                        _ = Task.Delay(1000).ContinueWith(_ => 
-                        {
-                            Application.Current?.Dispatcher.Invoke(() =>
-                            {
-                                virtualCollection.RefreshCollection();
-                                OnPropertyChanged(nameof(ScheduleData));
-                                DebugLog("VirtualScheduleCollection: Forced UI refresh applied");
-                            });
-                        });
-                    }
+                    LoadingStatus = $"Completed: {ScheduleData.Count} elements loaded";
+                    DebugLog($"Successfully loaded {ScheduleData.Count} elements");
                     
                     // Notify that data has changed
                     OnPropertyChanged(nameof(ScheduleData));
@@ -408,52 +335,33 @@ namespace RevitScheduleEditor
             }
             catch (OperationCanceledException)
             {
-                LoadingStatus = "❌ Loading cancelled";
+                LoadingStatus = "Loading cancelled";
                 DebugLog("Loading was cancelled");
             }
             catch (OutOfMemoryException)
             {
                 LoadingStatus = "Not enough memory to load this schedule";
-                DebugLog("OutOfMemoryException during loading - falling back to virtual loading");
+                DebugLog("OutOfMemoryException during loading");
                 
-                // VirtualizingCollection should handle memory better
+                // Clear data to free memory
+                _allScheduleData.Clear();
+                ScheduleData.Clear();
                 GC.Collect();
                 GC.WaitForPendingFinalizers();
             }
             catch (Exception ex)
             {
-                LoadingStatus = $"❌ Error: {ex.Message}";
-                DebugLog($"Error during loading: {ex}");
-                MessageBox.Show($"Error loading schedule data: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                LoadingStatus = $"Error: {ex.Message}";
+                DebugLog($"ERROR in LoadScheduleDataAsync: {ex.Message}\n{ex.StackTrace}");
+                
+                // Clear potentially corrupted data
+                _allScheduleData.Clear();
+                ScheduleData.Clear();
             }
             finally
             {
                 IsLoadingData = false;
-                DebugLog("=== LoadScheduleDataAsync Completed ===");
             }
-        }
-
-        // NEW: Load data using VirtualScheduleCollection for instant UI responsiveness
-        private async Task LoadWithVirtualizationAsync(List<ScheduleField> visibleFields, CancellationToken cancellationToken)
-        {
-            DebugLog("Loading with ProgressiveScheduleCollection - instant UI response with real-time loading");
-            
-            LoadingStatus = "🔄 Creating progressive loading collection...";
-            await Task.Delay(50, cancellationToken); // Allow UI update
-            
-            // Create progressive schedule collection
-            var progressiveCollection = new ProgressiveScheduleCollection(_doc, SelectedSchedule, visibleFields, chunkSize: 15);
-            ScheduleData = progressiveCollection;
-            
-            LoadingStatus = "⚡ Progressive loading started - items appear in real-time!";
-            await Task.Delay(50, cancellationToken); // Allow UI update
-            
-            LoadingStatus = $"🚀 Progressive loading active! Total: {TotalElements:N0} elements (loading in background)";
-            
-            DebugLog($"ProgressiveScheduleCollection created - ChunkSize: 15, Total: {TotalElements}");
-            
-            // No MessageBox - let the progressive loading work silently
-            // Progress will be visible as items appear in the DataGrid in real-time
         }
 
         // NEW: Optimized loading for small schedules
@@ -498,22 +406,21 @@ namespace RevitScheduleEditor
             }
         }
 
-        // NEW: Progressive loading for large schedules - Load 1000 first, then continue background loading
+        // NEW: Optimized loading for large schedules with chunking
         private async Task LoadLargeScheduleAsync(FilteredElementCollector collector, List<ScheduleField> visibleFields, CancellationToken cancellationToken)
         {
-            DebugLog("Using large schedule progressive loading strategy");
+            DebugLog("Using large schedule loading strategy with chunking");
             
-            // Show user choice for large schedules with speed optimization
+            // Show user choice for large schedules
             var result = MessageBox.Show(
-                $"⚡ ULTRA-FAST LOADING for {TotalElements} items\n\n" +
-                "🚀 RECOMMENDED STRATEGY:\n" +
-                "• YES = Progressive Loading (Load 1000 items instantly, then continue in background)\n" +
-                "• NO = Load all items with parallel processing (faster than before)\n" +
-                "• CANCEL = Cancel loading\n\n" +
-                "⚡ New: Parallel processing enabled for 5-10x faster loading!",
-                "🚀 Ultra-Fast Schedule Loading", 
+                $"This schedule contains {TotalElements} items which may take some time to load.\n\n" +
+                "Choose loading strategy:\n" +
+                "• YES = Load first 1000 items quickly (recommended)\n" +
+                "• NO = Load all items (may be slow)\n" +
+                "• CANCEL = Cancel loading",
+                "Large Schedule Loading Strategy", 
                 MessageBoxButton.YesNoCancel, 
-                MessageBoxImage.Information);
+                MessageBoxImage.Question);
 
             if (result == MessageBoxResult.Cancel)
             {
@@ -521,180 +428,75 @@ namespace RevitScheduleEditor
                 return;
             }
 
+            var loadLimit = result == MessageBoxResult.Yes ? 1000 : int.MaxValue;
+            
+            LoadingStatus = $"Loading large schedule (limit: {(loadLimit == int.MaxValue ? "no limit" : loadLimit.ToString())})...";
+            
             var elements = collector.ToElements();
-            DebugLog($"Retrieved {elements.Count} elements for processing");
-            
-            if (result == MessageBoxResult.Yes)
-            {
-                // Progressive loading: 1000 first, then background loading
-                await LoadProgressiveAsync(elements, visibleFields, cancellationToken);
-            }
-            else
-            {
-                // Load all at once with parallel processing
-                await LoadAllAtOnceAsync(elements, visibleFields, cancellationToken);
-            }
-        }
-
-        // Progressive loading implementation with speed tracking
-        private async Task LoadProgressiveAsync(IList<Element> elements, List<ScheduleField> visibleFields, CancellationToken cancellationToken)
-        {
-            DebugLog("Starting ultra-fast progressive loading");
-            var startTime = DateTime.Now;
-            
-            const int INITIAL_LOAD_COUNT = 1000;
-            var totalElements = elements.Count;
-            
-            // Phase 1: Load first 1000 items with parallel processing
-            LoadingStatus = "🚀 Phase 1: Ultra-fast loading first 1000 items...";
-            var initialElements = elements.Take(INITIAL_LOAD_COUNT).ToList();
-            
-            var phase1Start = DateTime.Now;
-            await LoadElementBatch(initialElements, visibleFields, cancellationToken, 0, INITIAL_LOAD_COUNT);
-            var phase1Duration = DateTime.Now - phase1Start;
-            
-            // Update UI immediately after Phase 1
-            LoadingProgress = (double)INITIAL_LOAD_COUNT / totalElements * 100;
-            var itemsLoaded = Math.Min(INITIAL_LOAD_COUNT, totalElements);
-            var speed1 = itemsLoaded / phase1Duration.TotalSeconds;
-            
-            LoadingStatus = $"✅ Ready to use! {itemsLoaded} items loaded in {phase1Duration.TotalSeconds:F1}s ({speed1:F0} items/sec)";
-            LoadedElements = itemsLoaded;
-            IsLoadingData = false; // User can start working now
-            
-            DebugLog($"Phase 1 completed: {ScheduleData.Count} items loaded at {speed1:F0} items/sec");
-            
-            // Phase 2: Continue loading remaining items in background if there are more
-            if (totalElements > INITIAL_LOAD_COUNT)
-            {
-                HasMoreDataToLoad = true;
-                IsBackgroundLoading = true;
-                
-                var remainingElements = elements.Skip(INITIAL_LOAD_COUNT).ToList();
-                DebugLog($"Phase 2: Loading remaining {remainingElements.Count} items in background");
-                
-                BackgroundLoadingStatus = $"🔄 Background loading {remainingElements.Count} more items with parallel processing...";
-                
-                // Add small delay to let user start working with initial data
-                await Task.Delay(500, cancellationToken);
-                
-                var phase2Start = DateTime.Now;
-                await LoadElementBatch(remainingElements, visibleFields, cancellationToken, INITIAL_LOAD_COUNT, totalElements);
-                var phase2Duration = DateTime.Now - phase2Start;
-                var speed2 = remainingElements.Count / phase2Duration.TotalSeconds;
-                
-                // Background loading completed
-                IsBackgroundLoading = false;
-                HasMoreDataToLoad = false;
-                
-                var totalDuration = DateTime.Now - startTime;
-                var overallSpeed = totalElements / totalDuration.TotalSeconds;
-                
-                BackgroundLoadingStatus = $"🎉 Complete! {remainingElements.Count} items added in {phase2Duration.TotalSeconds:F1}s ({speed2:F0} items/sec)";
-                LoadingStatus = $"Complete: {totalElements} items in {totalDuration.TotalSeconds:F1}s (avg: {overallSpeed:F0} items/sec)";
-                
-                DebugLog($"Progressive loading completed - Total: {overallSpeed:F0} items/sec");
-                
-                // Show completion notification with performance stats
-                MessageBox.Show(
-                    $"🚀 Ultra-Fast Progressive Loading Complete!\n\n" +
-                    $"📊 Performance Statistics:\n" +
-                    $"Phase 1: {itemsLoaded} items in {phase1Duration.TotalSeconds:F1}s ({speed1:F0} items/sec)\n" +
-                    $"Phase 2: {remainingElements.Count} items in {phase2Duration.TotalSeconds:F1}s ({speed2:F0} items/sec)\n" +
-                    $"Overall: {totalElements} items in {totalDuration.TotalSeconds:F1}s ({overallSpeed:F0} items/sec)\n\n" +
-                    $"✅ You can now work with the complete dataset!",
-                    "🚀 Progressive Loading Complete",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information);
-            }
-            else
-            {
-                var totalDuration = DateTime.Now - startTime;
-                var overallSpeed = totalElements / totalDuration.TotalSeconds;
-                LoadingStatus = $"Complete: {totalElements} items in {totalDuration.TotalSeconds:F1}s ({overallSpeed:F0} items/sec)";
-                HasMoreDataToLoad = false;
-                DebugLog($"All items loaded in Phase 1 at {overallSpeed:F0} items/sec");
-            }
-        }
-
-        // Load all elements at once (original behavior)
-        private async Task LoadAllAtOnceAsync(IList<Element> elements, List<ScheduleField> visibleFields, CancellationToken cancellationToken)
-        {
-            DebugLog("Loading all elements at once");
-            LoadingStatus = $"Loading all {elements.Count} elements...";
-            
-            await LoadElementBatch(elements, visibleFields, cancellationToken, 0, elements.Count);
-            
-            LoadingStatus = $"Loading complete: {elements.Count} items loaded";
-        }
-
-        // Helper method to load a batch of elements with PARALLEL PROCESSING
-        private async Task LoadElementBatch(IList<Element> elements, List<ScheduleField> visibleFields, CancellationToken cancellationToken, int startIndex, int totalCount)
-        {
-            DebugLog($"Loading batch of {elements.Count} elements with parallel processing");
+            var elementsToProcess = elements.Take(loadLimit).ToList();
             
             var processedCount = 0;
-            var batchSize = Math.Min(100, elements.Count); // Process in smaller batches for UI updates
+            var currentChunk = new List<ScheduleRow>();
             
-            for (int i = 0; i < elements.Count; i += batchSize)
+            foreach (Element elem in elementsToProcess)
             {
                 if (cancellationToken.IsCancellationRequested) break;
                 
-                var batch = elements.Skip(i).Take(batchSize).ToList();
-                
-                // Process batch in parallel for maximum speed
-                var tasks = batch.Select(async elem =>
-                {
-                    if (elem == null || !elem.IsValidObject) return null;
-                    return await ProcessElementAsync(elem, visibleFields, cancellationToken);
-                }).ToArray();
-                
                 try
                 {
-                    // Wait for all elements in batch to complete
-                    var batchResults = await Task.WhenAll(tasks);
-                    
-                    // Add successful results to collections
-                    var validResults = batchResults.Where(row => row != null).ToList();
-                    
-                    foreach (var row in validResults)
+                    if (elem == null || !elem.IsValidObject) continue;
+
+                    var scheduleRow = await ProcessElementAsync(elem, visibleFields, cancellationToken);
+                    if (scheduleRow != null)
                     {
-                        _allScheduleData.Add(row);
-                        ScheduleData.Add(row);
+                        _allScheduleData.Add(scheduleRow);
+                        currentChunk.Add(scheduleRow);
+                        processedCount++;
                     }
-                    
-                    processedCount += validResults.Count;
-                    
-                    // Update progress
-                    var totalProcessed = startIndex + processedCount;
-                    LoadingProgress = (double)totalProcessed / totalCount * 100;
-                    LoadingStatus = $"Loaded {totalProcessed}/{totalCount} elements... (batch: {validResults.Count}/{batch.Count})";
-                    LoadedElements = totalProcessed;
-                    
-                    // Force UI update after each batch
-                    OnPropertyChanged(nameof(ScheduleData));
-                    
-                    // Yield control to UI thread - shorter delay for faster loading
-                    await Task.Delay(1, cancellationToken);
-                    
-                    // Aggressive garbage collection for large datasets
-                    if (processedCount % 1000 == 0)
+
+                    // Process in chunks to keep UI responsive
+                    if (currentChunk.Count >= CHUNK_SIZE)
                     {
-                        GC.Collect(0, GCCollectionMode.Optimized);
-                        DebugLog($"GC performed after {processedCount} elements");
+                        // Add chunk to UI
+                        foreach (var row in currentChunk)
+                        {
+                            ScheduleData.Add(row);
+                        }
+                        currentChunk.Clear();
+                        
+                        LoadingProgress = (double)processedCount / elementsToProcess.Count * 100;
+                        LoadingStatus = $"Loaded {processedCount}/{elementsToProcess.Count} elements...";
+                        LoadedElements = processedCount;
+                        
+                        // Yield control to UI thread
+                        await Task.Delay(10, cancellationToken);
+                        
+                        // Periodic garbage collection for large datasets
+                        if (processedCount % 500 == 0)
+                        {
+                            GC.Collect(0, GCCollectionMode.Optimized);
+                        }
                     }
                 }
                 catch (Exception ex)
                 {
-                    DebugLog($"Error processing batch: {ex.Message}");
-                    // Continue with next batch
+                    DebugLog($"Error processing element {elem?.Id}: {ex.Message}");
                 }
             }
             
-            DebugLog($"Batch loading completed: {processedCount} elements processed");
+            // Add remaining chunk
+            foreach (var row in currentChunk)
+            {
+                ScheduleData.Add(row);
+            }
+            
+            if (processedCount < elements.Count)
+            {
+                LoadingStatus = $"Loaded {processedCount} of {elements.Count} elements (limited for performance)";
+            }
         }
 
-        // NEW: Super fast async element processing with parallel processing
+        // NEW: Async element processing
         private async Task<ScheduleRow> ProcessElementAsync(Element elem, List<ScheduleField> visibleFields, CancellationToken cancellationToken)
         {
             if (cancellationToken.IsCancellationRequested) return null;
@@ -703,13 +505,60 @@ namespace RevitScheduleEditor
             {
                 var scheduleRow = new ScheduleRow(elem);
                 
-                // Fast parameter reading - avoid try-catch overhead for each field
                 foreach (var field in visibleFields)
                 {
                     if (cancellationToken.IsCancellationRequested) return null;
                     
-                    string value = GetParameterValueFast(elem, field);
-                    scheduleRow.AddValue(field.GetName(), value);
+                    try
+                    {
+                        Parameter param = GetParameterFromField(elem, field);
+                        string value = string.Empty;
+                        
+                        if (param != null)
+                        {
+                            try
+                            {
+                                // Use faster parameter access methods
+                                if (param.HasValue)
+                                {
+                                    switch (param.StorageType)
+                                    {
+                                        case StorageType.String:
+                                            value = param.AsString() ?? string.Empty;
+                                            break;
+                                        case StorageType.Integer:
+                                            value = param.AsInteger().ToString();
+                                            break;
+                                        case StorageType.Double:
+                                            value = param.AsValueString() ?? param.AsDouble().ToString("F2");
+                                            break;
+                                        case StorageType.ElementId:
+                                            var elemId = param.AsElementId();
+                                            if (elemId != ElementId.InvalidElementId)
+                                            {
+                                                var referencedElem = _doc.GetElement(elemId);
+                                                value = referencedElem?.Name ?? elemId.IntegerValue.ToString();
+                                            }
+                                            break;
+                                        default:
+                                            value = param.AsValueString() ?? string.Empty;
+                                            break;
+                                    }
+                                }
+                            }
+                            catch
+                            {
+                                value = string.Empty;
+                            }
+                        }
+                        
+                        scheduleRow.AddValue(field.GetName(), value);
+                    }
+                    catch (Exception fieldEx)
+                    {
+                        DebugLog($"Error processing field {field.GetName()}: {fieldEx.Message}");
+                        scheduleRow.AddValue(field.GetName(), string.Empty);
+                    }
                 }
                 
                 return scheduleRow;
@@ -718,53 +567,6 @@ namespace RevitScheduleEditor
             {
                 DebugLog($"Error creating schedule row for element {elem?.Id}: {ex.Message}");
                 return null;
-            }
-        }
-
-        // NEW: Super fast parameter value extraction
-        private string GetParameterValueFast(Element elem, ScheduleField field)
-        {
-            try
-            {
-                Parameter param = GetParameterFromField(elem, field);
-                if (param?.HasValue != true) return string.Empty;
-                
-                // Fast path for common parameter types
-                switch (param.StorageType)
-                {
-                    case StorageType.String:
-                        return param.AsString() ?? string.Empty;
-                        
-                    case StorageType.Integer:
-                        return param.AsInteger().ToString();
-                        
-                    case StorageType.Double:
-                        // Use AsValueString() first as it's faster than AsDouble().ToString()
-                        var valueStr = param.AsValueString();
-                        return !string.IsNullOrEmpty(valueStr) ? valueStr : param.AsDouble().ToString("F2");
-                        
-                    case StorageType.ElementId:
-                        var elemId = param.AsElementId();
-                        if (elemId == ElementId.InvalidElementId) return string.Empty;
-                        
-                        // Fast element name lookup with caching potential
-                        try
-                        {
-                            var referencedElem = _doc.GetElement(elemId);
-                            return referencedElem?.Name ?? elemId.IntegerValue.ToString();
-                        }
-                        catch
-                        {
-                            return elemId.IntegerValue.ToString();
-                        }
-                        
-                    default:
-                        return param.AsValueString() ?? string.Empty;
-                }
-            }
-            catch
-            {
-                return string.Empty;
             }
         }
 

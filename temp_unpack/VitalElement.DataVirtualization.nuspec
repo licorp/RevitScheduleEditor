@@ -1,0 +1,15 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+  <metadata>
+    <id>VitalElement.DataVirtualization</id>
+    <version>0.0.40</version>
+    <authors>VitalElement.DataVirtualization</authors>
+    <description>Package Description</description>
+    <repository type="git" commit="bf4c82921f49a1ddd21c54f0f07f3a603f0ba478" />
+    <dependencies>
+      <group targetFramework=".NETStandard2.0">
+        <dependency id="System.Reactive" version="5.0.0" exclude="Build,Analyzers" />
+      </group>
+    </dependencies>
+  </metadata>
+</package>
