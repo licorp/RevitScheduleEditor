@@ -22,13 +22,25 @@ Text Filters là một tính năng mới được thêm vào RevitScheduleEditor
 ## Cách sử dụng
 
 1. **Mở Schedule Editor** trong Revit
-2. **Click vào filter button** (biểu tượng funnel) trên header của cột muốn filter
-3. **Chọn các giá trị** muốn hiển thị:
+2. **Load data**: Click "Preview/Edit" để load schedule data
+3. **Click vào filter button** (biểu tượng ▼) trên header của cột muốn filter
+4. **Chọn các giá trị** muốn hiển thị:
+   - 💡 **Quan trọng**: UNCHECK items để hide chúng. Chỉ checked items sẽ visible
    - Dùng Search box để tìm nhanh
-   - Click checkbox để chọn/bỏ chọn từng item
    - Dùng "Select All" để chọn/bỏ chọn tất cả
-4. **Click OK** để áp dụng filter
-5. **Repeat** cho các cột khác nếu cần
+   - Status text cho biết số items được chọn và effect của filter
+5. **Click OK** để áp dụng filter
+6. **Repeat** cho các cột khác nếu cần
+
+### 🎯 Tip sử dụng:
+- **All items checked** = Không filter (hiển thị tất cả)
+- **Some items unchecked** = Filter active (hide unchecked items)
+- **No items checked** = Hide tất cả (empty results)
+
+### 🧪 Test Buttons:
+- **"Test Filter"** (tím): Test dialog với sample data có pre-selection
+- **"Test Real"** (hồng): Test filter trên actual data
+- **"Demo"** (cam): Demo filter với 30% items pre-selected
 
 ## Ví dụ sử dụng
 - Filter các Element ID cụ thể: `420.05.010d`, `420.05.013a`, `420.05.111`
@@ -72,9 +84,52 @@ Sau khi build thành công, file `RevitScheduleEditor_YYYYMMDD_HHMMSS.dll` sẽ 
 
 Copy file này vào thư mục Revit Add-ins để sử dụng.
 
-## Future Enhancements
+## Debug & Troubleshooting (Added 09/09/2025)
 
-- **Advanced filtering**: Thêm các operators như "contains", "starts with", "ends with"
-- **Custom filters**: Cho phép user tạo custom filter expressions
-- **Save filter presets**: Lưu và load các filter configurations
-- **Export filtered data**: Export chỉ data đã được filter
+### 🔧 Debug Tools Added:
+
+1. **Test Filter Button** (màu tím):
+   - Test TextFiltersWindow với sample data
+   - Verify filter dialog hoạt động
+   - Independent của actual schedule data
+
+2. **Test Real Button** (màu hồng):
+   - Test filter trên data thực đã load
+   - Tự động chọn column đầu tiên
+   - Debug actual filter workflow
+
+3. **Enhanced Debug Logging**:
+   - Chi tiết logging trong FilterButton_Click
+   - Track ApplyFilters() execution step by step
+   - Count original vs filtered data
+   - Exception handling với stack trace
+
+### 🐛 Troubleshooting Steps:
+
+**Nếu filter không hoạt động:**
+
+1. **Load data first**: Click "Preview/Edit" để load schedule data
+2. **Test dialog**: Click "Test Filter" để verify dialog works
+3. **Test real filter**: Click "Test Real" để test trên data thực
+4. **Check debug output**: Xem logs trong Revit debug console
+
+**Debug Log Examples:**
+```
+[ScheduleEditorWindow] ApplyFilters - Started, active filters: 1
+[ScheduleEditorWindow] ApplyFilters - Original data count: 236
+[ScheduleEditorWindow] ApplyFilters - Applying filter for column 'CRR_UQID_ASSET' with 50 allowed values
+[ScheduleEditorWindow] ApplyFilters - Filtered data count: 125
+[ScheduleEditorWindow] ApplyFilters - DataGrid ItemsSource updated successfully
+```
+
+**Common Issues:**
+- **"All items selected"** → Filter removed, all data shown
+- **No debug logs** → Method not called, check button clicks
+- **Exception in ApplyFilters** → Data binding issue, check ScheduleData
+
+### 🔍 Current Status (Based on User Log):
+- ✅ Dialog hiển thị và hoạt động 
+- ✅ Filter button clicks được detect
+- ✅ Values được load correctly (225 unique values)
+- ❌ ApplyFilters() chưa được gọi → **Cần debug tiếp**
+

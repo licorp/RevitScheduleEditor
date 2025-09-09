@@ -68,6 +68,9 @@
     <Compile Include="TextFiltersWindow.xaml.cs">
       <DependentUpon>TextFiltersWindow.xaml</DependentUpon>
     </Compile>
+    <Compile Include="FilterTestWindow.xaml.cs">
+      <DependentUpon>FilterTestWindow.xaml</DependentUpon>
+    </Compile>
     <Compile Include="ScheduleRow.cs" />
     <Compile Include="ShowScheduleEditorCommand.cs" />
     <Compile Include="VirtualScheduleCollection.cs" />
@@ -79,6 +82,10 @@
       <Generator>MSBuild:Compile</Generator>
     </Page>
     <Page Include="TextFiltersWindow.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="FilterTestWindow.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>

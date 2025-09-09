@@ -29,12 +29,16 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
         
-        <!-- Title -->
-        <TextBlock Grid.Row="0" 
-                   Text="Text Filters" 
-                   FontWeight="Bold" 
-                   Margin="10,10,10,5" 
-                   FontSize="14"/>
+        <!-- Title and Instructions -->
+        <StackPanel Grid.Row="0" Margin="10,10,10,5">
+            <TextBlock Text="Text Filters" 
+                       FontWeight="Bold" 
+                       FontSize="14"/>
+            <TextBlock Text="💡 Uncheck items to hide them. Only checked items will be visible." 
+                       FontSize="11" 
+                       Foreground="#666666" 
+                       Margin="0,2,0,0"/>
+        </StackPanel>
         
         <!-- Search Box -->
         <Border Grid.Row="1" 
@@ -141,21 +145,30 @@
             </Grid>
         </Border>
         
-        <!-- Buttons -->
-        <StackPanel Grid.Row="3" 
-                    Orientation="Horizontal" 
-                    HorizontalAlignment="Right" 
-                    Margin="10,5,10,10">
-            <Button x:Name="OkButton" 
-                    Content="OK" 
-                    Click="OkButton_Click" 
-                    IsDefault="True"
-                    Style="{StaticResource DialogButtonStyle}"/>
-            <Button x:Name="CancelButton" 
-                    Content="Cancel" 
-                    Click="CancelButton_Click" 
-                    IsCancel="True"
-                    Style="{StaticResource DialogButtonStyle}"/>
+        <!-- Status and Buttons -->
+        <StackPanel Grid.Row="3" Margin="10,5,10,10">
+            <!-- Status Info -->
+            <TextBlock x:Name="StatusTextBlock" 
+                       Text="{Binding StatusText}" 
+                       FontSize="11" 
+                       Foreground="#666666" 
+                       Margin="0,0,0,5" 
+                       HorizontalAlignment="Left"/>
+            
+            <!-- Buttons -->
+            <StackPanel Orientation="Horizontal" 
+                        HorizontalAlignment="Right">
+                <Button x:Name="OkButton" 
+                        Content="OK" 
+                        Click="OkButton_Click" 
+                        IsDefault="True"
+                        Style="{StaticResource DialogButtonStyle}"/>
+                <Button x:Name="CancelButton" 
+                        Content="Cancel" 
+                        Click="CancelButton_Click" 
+                        IsCancel="True"
+                        Style="{StaticResource DialogButtonStyle}"/>
+            </StackPanel>
         </StackPanel>
     </Grid>
 </Window>
