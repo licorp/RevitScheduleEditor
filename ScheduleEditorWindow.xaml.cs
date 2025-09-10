@@ -9,6 +9,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Effects;
 using System.Windows.Shapes;
 using Grid = System.Windows.Controls.Grid;
 using Rectangle = System.Windows.Shapes.Rectangle;
@@ -464,7 +465,7 @@ namespace RevitScheduleEditor
 
                     // Update the column header visual to show filter status
                     DebugLog($"ShowFilterPopup - Updating column header status for {columnName}");
-                    UpdateColumnHeaderFilterStatus(columnName, _columnFilters.ContainsKey(columnName));
+                    UpdateColumnHeaderAppearance(columnName, _columnFilters.ContainsKey(columnName));
                     
                     // Apply all filters to refresh the view
                     DebugLog("ShowFilterPopup - Calling ApplyFilters()");
@@ -577,16 +578,61 @@ namespace RevitScheduleEditor
             {
                 if (column.Header.ToString() == columnName)
                 {
-                    // Set Tag on the column to trigger visual state
+                    // Apply appropriate style based on filter status
                     if (hasFilter)
                     {
-                        column.HeaderStyle = this.FindResource("FilterColumnHeaderStyleActive") as Style ?? column.HeaderStyle;
+                        // Try to get active filter style, fallback to creating inline style
+                        var activeStyle = this.FindResource("FilterColumnHeaderStyleActive") as Style;
+                        if (activeStyle != null)
+                        {
+                            column.HeaderStyle = activeStyle;
+                        }
+                        else
+                        {
+                            // Create inline style for filtered columns with vibrant orange highlight
+                            var style = new Style(typeof(DataGridColumnHeader));
+                            style.Setters.Add(new Setter(DataGridColumnHeader.BackgroundProperty, new SolidColorBrush(Color.FromRgb(255, 107, 53)))); // Vibrant orange
+                            style.Setters.Add(new Setter(DataGridColumnHeader.BorderBrushProperty, new SolidColorBrush(Color.FromRgb(229, 81, 0)))); // Dark orange border
+                            style.Setters.Add(new Setter(DataGridColumnHeader.BorderThicknessProperty, new Thickness(0, 0, 2, 2))); // Thicker border
+                            style.Setters.Add(new Setter(DataGridColumnHeader.FontWeightProperty, FontWeights.Bold));
+                            style.Setters.Add(new Setter(DataGridColumnHeader.ForegroundProperty, Brushes.White)); // White text
+                            
+                            // Add drop shadow effect
+                            var dropShadow = new DropShadowEffect
+                            {
+                                Color = Color.FromRgb(255, 107, 53),
+                                Opacity = 0.6,
+                                ShadowDepth = 1,
+                                BlurRadius = 3
+                            };
+                            style.Setters.Add(new Setter(UIElement.EffectProperty, dropShadow));
+                            
+                            column.HeaderStyle = style;
+                        }
                     }
                     else
                     {
+                        // Reset to default style
                         column.HeaderStyle = this.FindResource("FilterColumnHeaderStyle") as Style;
                     }
                     break;
+                }
+            }
+        }
+
+        // Update all column headers to reflect current filter status
+        private void UpdateAllColumnHeadersAppearance()
+        {
+            var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
+            if (dataGrid == null) return;
+
+            foreach (DataGridColumn column in dataGrid.Columns)
+            {
+                string columnName = column.Header?.ToString();
+                if (!string.IsNullOrEmpty(columnName))
+                {
+                    bool hasFilter = _columnFilters.ContainsKey(columnName);
+                    UpdateColumnHeaderAppearance(columnName, hasFilter);
                 }
             }
         }
@@ -1152,6 +1198,9 @@ namespace RevitScheduleEditor
                 {
                     DebugLog("ApplyFilters - No filters active, showing all data");
                     dataGrid.ItemsSource = _viewModel.ScheduleData;
+                    
+                    // Update all column headers to reflect no filters
+                    UpdateAllColumnHeadersAppearance();
                     return;
                 }
 
@@ -1207,6 +1256,9 @@ namespace RevitScheduleEditor
                 dataGrid.ItemsSource = resultList;
                 
                 DebugLog("ApplyFilters - DataGrid ItemsSource updated successfully");
+                
+                // Update all column headers to reflect current filter status
+                UpdateAllColumnHeadersAppearance();
             }
             catch (Exception ex)
             {
