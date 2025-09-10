@@ -43,12 +43,23 @@ namespace RevitScheduleEditor
             // User can use "Select All" button if they want to check everything
             bool defaultSelection = false; // Start with nothing selected for clearer workflow
             
-            foreach (var value in uniqueValues.OrderBy(v => v))
+            // Process values and sort with "(Blanks)" first like Excel
+            var processedValues = uniqueValues.Select(value => new 
+            {
+                Original = value,
+                Display = string.IsNullOrWhiteSpace(value) ? "(Blanks)" : value,
+                IsBlank = string.IsNullOrWhiteSpace(value)
+            })
+            .OrderBy(x => x.IsBlank ? 0 : 1)  // Blanks first
+            .ThenBy(x => x.Display);          // Then alphabetical
+            
+            foreach (var valueInfo in processedValues)
             {
                 var item = new FilterItem
                 {
-                    Value = value,
-                    IsSelected = currentFilter?.Contains(value) ?? defaultSelection
+                    Value = valueInfo.Display,
+                    ActualValue = valueInfo.Original, // Store original value for filtering
+                    IsSelected = currentFilter?.Contains(valueInfo.Original) ?? defaultSelection
                 };
                 
                 item.PropertyChanged += FilterItem_PropertyChanged;
@@ -128,7 +139,12 @@ namespace RevitScheduleEditor
             else
             {
                 var filtered = _allItems.Where(item => 
-                    item.Value.IndexOf(SearchText, StringComparison.OrdinalIgnoreCase) >= 0);
+                {
+                    // Search in both display value (e.g., "(Blanks)") and actual value
+                    var displayMatch = item.Value?.IndexOf(SearchText, StringComparison.OrdinalIgnoreCase) >= 0;
+                    var actualMatch = item.ActualValue?.IndexOf(SearchText, StringComparison.OrdinalIgnoreCase) >= 0;
+                    return displayMatch || actualMatch;
+                });
                 FilteredItems = new ObservableCollection<FilterItem>(filtered);
             }
             
@@ -233,9 +249,9 @@ namespace RevitScheduleEditor
             // Note: Removed intrusive warning dialog that was interrupting user workflow
             // Users can apply "no filter" (all selected) if they want to see all data
             
-            // Get selected values from all items (not just filtered)
+            // Get selected values from all items (not just filtered) - use ActualValue for filtering
             SelectedValues = _allItems.Where(item => item.IsSelected)
-                                    .Select(item => item.Value)
+                                    .Select(item => item.ActualValue ?? item.Value) // Fallback to Value if ActualValue is null
                                     .ToList();
             
             DialogResult = true;
@@ -284,6 +300,7 @@ namespace RevitScheduleEditor
     {
         private bool _isSelected;
         private string _value;
+        private string _actualValue;
 
         public string Value
         {
@@ -292,6 +309,19 @@ namespace RevitScheduleEditor
             {
                 _value = value;
                 OnPropertyChanged(nameof(Value));
+            }
+        }
+
+        /// <summary>
+        /// The actual value used for filtering (original value before display transformation)
+        /// </summary>
+        public string ActualValue
+        {
+            get => _actualValue;
+            set
+            {
+                _actualValue = value;
+                OnPropertyChanged(nameof(ActualValue));
             }
         }
 

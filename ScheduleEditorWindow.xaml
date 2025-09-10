@@ -259,8 +259,11 @@
                   CanUserSortColumns="True"
                   SelectionMode="Extended"
                   SelectionUnit="Cell"
-                  EnableRowVirtualization="False"
-                  EnableColumnVirtualization="False">
+                  EnableRowVirtualization="True"
+                  EnableColumnVirtualization="True"
+                  VirtualizingPanel.IsVirtualizing="True"
+                  VirtualizingPanel.VirtualizationMode="Recycling"
+                  VirtualizingPanel.IsContainerVirtualizable="True">
             
             <!-- Input Bindings for keyboard shortcuts -->
             <DataGrid.InputBindings>

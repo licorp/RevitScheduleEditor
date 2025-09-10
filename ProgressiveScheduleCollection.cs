@@ -39,14 +39,15 @@ namespace RevitScheduleEditor
             var collector = new FilteredElementCollector(_doc, _schedule.Id);
             _allElements = collector.ToElements();
 
-            // Setup timer for progressive loading
+            // Setup timer for progressive loading with dynamic interval based on size
+            var timerInterval = _allElements.Count > 1000 ? 100 : (_allElements.Count > 500 ? 75 : 50);
             _loadTimer = new DispatcherTimer(DispatcherPriority.Background)
             {
-                Interval = TimeSpan.FromMilliseconds(50) // Load chunk every 50ms
+                Interval = TimeSpan.FromMilliseconds(timerInterval) // Dynamic interval for better performance
             };
             _loadTimer.Tick += LoadNextChunk;
 
-            System.Diagnostics.Debug.WriteLine($"ProgressiveScheduleCollection initialized - Total: {_allElements.Count}, ChunkSize: {_chunkSize}");
+            System.Diagnostics.Debug.WriteLine($"ProgressiveScheduleCollection initialized - Total: {_allElements.Count}, ChunkSize: {_chunkSize}, Interval: {timerInterval}ms");
             
             // Start loading immediately
             StartProgressiveLoading();
@@ -80,8 +81,9 @@ namespace RevitScheduleEditor
                 }
 
                 var endIndex = Math.Min(_loadedIndex + _chunkSize, _allElements.Count);
-                var chunkLoaded = 0;
+                var chunkItems = new List<ScheduleRow>();
 
+                // Pre-process chunk in background to avoid UI blocking
                 for (int i = _loadedIndex; i < endIndex; i++)
                 {
                     try
@@ -92,8 +94,7 @@ namespace RevitScheduleEditor
                             var scheduleRow = CreateScheduleRowFromElement(element);
                             if (scheduleRow != null)
                             {
-                                Add(scheduleRow);
-                                chunkLoaded++;
+                                chunkItems.Add(scheduleRow);
                             }
                         }
                     }
@@ -103,13 +104,19 @@ namespace RevitScheduleEditor
                     }
                 }
 
+                // Add all items at once to reduce collection change notifications
+                foreach (var item in chunkItems)
+                {
+                    Add(item);
+                }
+
                 _loadedIndex = endIndex;
                 
-                if (chunkLoaded > 0)
+                if (chunkItems.Count > 0)
                 {
-                    System.Diagnostics.Debug.WriteLine($"Loaded chunk: {chunkLoaded} items, Total: {Count}/{TotalElements}");
+                    System.Diagnostics.Debug.WriteLine($"Loaded chunk: {chunkItems.Count} items, Total: {Count}/{TotalElements}");
                     
-                    // Fire events to notify UI
+                    // Fire events to notify UI (batched)
                     OnPropertyChanged(new PropertyChangedEventArgs("Count"));
                     OnPropertyChanged(new PropertyChangedEventArgs("LoadedElements"));
                     OnPropertyChanged(new PropertyChangedEventArgs("IsComplete"));

@@ -445,8 +445,11 @@ namespace RevitScheduleEditor
             LoadingStatus = "🔄 Creating progressive loading collection...";
             await Task.Delay(50, cancellationToken); // Allow UI update
             
-            // Create progressive schedule collection
-            var progressiveCollection = new ProgressiveScheduleCollection(_doc, SelectedSchedule, visibleFields, chunkSize: 15);
+            // Create progressive schedule collection with larger chunk size for better performance
+            var chunkSize = TotalElements > 1000 ? 50 : (TotalElements > 500 ? 30 : 20);
+            DebugLog($"Using dynamic chunk size: {chunkSize} for {TotalElements} elements");
+            
+            var progressiveCollection = new ProgressiveScheduleCollection(_doc, SelectedSchedule, visibleFields, chunkSize);
             ScheduleData = progressiveCollection;
             
             LoadingStatus = "⚡ Progressive loading started - items appear in real-time!";
@@ -454,7 +457,7 @@ namespace RevitScheduleEditor
             
             LoadingStatus = $"🚀 Progressive loading active! Total: {TotalElements:N0} elements (loading in background)";
             
-            DebugLog($"ProgressiveScheduleCollection created - ChunkSize: 15, Total: {TotalElements}");
+            DebugLog($"ProgressiveScheduleCollection created - ChunkSize: {chunkSize}, Total: {TotalElements}");
             
             // No MessageBox - let the progressive loading work silently
             // Progress will be visible as items appear in the DataGrid in real-time

@@ -152,7 +152,48 @@ namespace RevitScheduleEditor
                 var selectedCellsCount = dataGrid.SelectedCells?.Count ?? 0;
                 var selectedItemsCount = dataGrid.SelectedItems?.Count ?? 0;
                 DebugLog($"SelectionChanged - SelectedCells: {selectedCellsCount}, SelectedItems: {selectedItemsCount}");
+                
+                // Debug: Log first few selected cells
+                if (selectedCellsCount > 0)
+                {
+                    var firstFew = dataGrid.SelectedCells.Take(3);
+                    foreach (var cell in firstFew)
+                    {
+                        DebugLog($"  Selected cell: {cell.Column?.Header} in item {dataGrid.Items.IndexOf(cell.Item)}");
+                    }
+                }
             };
+
+            // Add mouse event debugging
+            dataGrid.MouseDown += (sender, e) =>
+            {
+                DebugLog($"MouseDown - Button: {e.ChangedButton}, Position: {e.GetPosition(dataGrid)}");
+            };
+            
+            dataGrid.MouseUp += (sender, e) =>
+            {
+                var selectedCellsCount = dataGrid.SelectedCells?.Count ?? 0;
+                DebugLog($"MouseUp - Button: {e.ChangedButton}, SelectedCells after: {selectedCellsCount}");
+            };
+
+            // Add context menu for copy/paste
+            var contextMenu = new ContextMenu();
+            
+            var copyMenuItem = new MenuItem { Header = "Copy (Ctrl+C)" };
+            copyMenuItem.Click += (s, e) => {
+                DebugLog("Context menu Copy clicked");
+                CopyCells();
+            };
+            
+            var pasteMenuItem = new MenuItem { Header = "Paste (Ctrl+V)" };
+            pasteMenuItem.Click += (s, e) => {
+                DebugLog("Context menu Paste clicked");
+                PasteCells();
+            };
+            
+            contextMenu.Items.Add(copyMenuItem);
+            contextMenu.Items.Add(pasteMenuItem);
+            dataGrid.ContextMenu = contextMenu;
 
             dataGrid.CurrentCellChanged += (sender, e) =>
             {
@@ -162,7 +203,23 @@ namespace RevitScheduleEditor
             // Handle Enter key to move to next cell (like Excel)
             dataGrid.PreviewKeyDown += (sender, e) =>
             {
-                if (e.Key == Key.Enter)
+                DebugLog($"PreviewKeyDown - Key: {e.Key}, Modifiers: {Keyboard.Modifiers}");
+                
+                if (e.Key == Key.C && Keyboard.Modifiers == ModifierKeys.Control)
+                {
+                    DebugLog($"Ctrl+C detected in PreviewKeyDown - Selected cells: {dataGrid.SelectedCells.Count}");
+                    // Ctrl+C: Copy selected cells
+                    CopyCells();
+                    e.Handled = true;
+                }
+                else if (e.Key == Key.V && Keyboard.Modifiers == ModifierKeys.Control)
+                {
+                    DebugLog($"Ctrl+V detected in PreviewKeyDown - Current cell: {dataGrid.CurrentCell.Column?.Header}");
+                    // Ctrl+V: Paste cells
+                    PasteCells();
+                    e.Handled = true;
+                }
+                else if (e.Key == Key.Enter)
                 {
                     e.Handled = true;
                     
@@ -338,10 +395,9 @@ namespace RevitScheduleEditor
             }
             else
             {
-                // Regular column values - normalize them for consistent filtering
+                // Regular column values - include empty values for "(Blanks)" functionality
                 uniqueValues = _viewModel.ScheduleData
                     .Select(row => row.Values.ContainsKey(columnName) ? row.Values[columnName] : "")
-                    .Where(v => !string.IsNullOrEmpty(v))
                     .Select(v => (v ?? "").Trim()) // Normalize by trimming whitespace
                     .Distinct(StringComparer.OrdinalIgnoreCase) // Case-insensitive distinct
                     .OrderBy(v => v, StringComparer.OrdinalIgnoreCase) // Case-insensitive sort
@@ -906,9 +962,10 @@ namespace RevitScheduleEditor
                 }
             };
 
-            // Enhanced autofill on Enter key
             dataGrid.KeyDown += (sender, e) =>
             {
+                DebugLog($"KeyDown - Key: {e.Key}, Modifiers: {Keyboard.Modifiers}");
+                
                 if (e.Key == Key.Enter && Keyboard.Modifiers == ModifierKeys.Control)
                 {
                     if (dataGrid.SelectedCells.Count > 1)
@@ -1165,5 +1222,213 @@ namespace RevitScheduleEditor
                 }
             }
         }
+
+        #region Copy/Paste Functionality
+        
+        private string _clipboardData = string.Empty;
+        
+        private void CopyCells()
+        {
+            var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
+            if (dataGrid == null) 
+            {
+                DebugLog("CopyCells - DataGrid not found");
+                return;
+            }
+            
+            var selectedCells = dataGrid.SelectedCells;
+            DebugLog($"CopyCells - DataGrid found, SelectedCells count: {selectedCells?.Count ?? 0}");
+            
+            if (selectedCells == null || selectedCells.Count == 0)
+            {
+                DebugLog("CopyCells - No cells selected");
+                
+                // Try to get current cell if no selection
+                var currentCell = dataGrid.CurrentCell;
+                if (currentCell.Item != null && currentCell.Column != null)
+                {
+                    DebugLog($"CopyCells - Using current cell: {currentCell.Column.Header}");
+                    
+                    // Create a single cell selection
+                    var scheduleRow = currentCell.Item as ScheduleRow;
+                    var column = currentCell.Column as DataGridBoundColumn;
+                    
+                    if (scheduleRow != null && column != null)
+                    {
+                        var binding = column.Binding as System.Windows.Data.Binding;
+                        if (binding != null)
+                        {
+                            var fieldName = binding.Path.Path.Trim('[', ']');
+                            var value = scheduleRow[fieldName] ?? "";
+                            
+                            _clipboardData = value;
+                            Clipboard.SetText(value);
+                            
+                            DebugLog($"CopyCells - Copied current cell value: '{value}'");
+                            return;
+                        }
+                    }
+                }
+                
+                DebugLog("CopyCells - No current cell available either");
+                return;
+            }
+            
+            DebugLog($"CopyCells - Processing {selectedCells.Count} selected cells");
+            
+            try
+            {
+                // Convert selected cells to text format (tab-separated)
+                var cellData = new List<string>();
+                
+                // Group cells by row and column for proper ordering
+                var cellsByRow = selectedCells
+                    .Cast<DataGridCellInfo>()
+                    .Where(cell => cell.Item != null && cell.Column != null)
+                    .GroupBy(cell => cell.Item)
+                    .OrderBy(group => dataGrid.Items.IndexOf(group.Key))
+                    .ToList();
+                
+                DebugLog($"CopyCells - Grouped into {cellsByRow.Count} rows");
+                
+                foreach (var rowGroup in cellsByRow)
+                {
+                    var cellsInRow = rowGroup
+                        .OrderBy(cell => cell.Column.DisplayIndex)
+                        .ToList();
+                    
+                    var rowValues = new List<string>();
+                    
+                    foreach (var cellInfo in cellsInRow)
+                    {
+                        var scheduleRow = cellInfo.Item as ScheduleRow;
+                        var column = cellInfo.Column as DataGridBoundColumn;
+                        
+                        if (scheduleRow != null && column != null)
+                        {
+                            var binding = column.Binding as System.Windows.Data.Binding;
+                            if (binding != null)
+                            {
+                                var fieldName = binding.Path.Path.Trim('[', ']');
+                                var value = scheduleRow[fieldName] ?? "";
+                                rowValues.Add(value);
+                                DebugLog($"CopyCells - Cell [{fieldName}] = '{value}'");
+                            }
+                        }
+                    }
+                    
+                    if (rowValues.Count > 0)
+                    {
+                        cellData.Add(string.Join("\t", rowValues));
+                    }
+                }
+                
+                _clipboardData = string.Join("\n", cellData);
+                
+                // Also copy to system clipboard
+                if (!string.IsNullOrEmpty(_clipboardData))
+                {
+                    Clipboard.SetText(_clipboardData);
+                    DebugLog($"CopyCells - Successfully copied {cellData.Count} rows to clipboard");
+                }
+                else
+                {
+                    DebugLog("CopyCells - No data to copy");
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"CopyCells - Error: {ex.Message}");
+                DebugLog($"CopyCells - StackTrace: {ex.StackTrace}");
+            }
+        }
+        
+        private void PasteCells()
+        {
+            var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
+            if (dataGrid == null) return;
+            
+            var currentCell = dataGrid.CurrentCell;
+            if (currentCell.Item == null || currentCell.Column == null)
+            {
+                DebugLog("PasteCells - No current cell selected");
+                return;
+            }
+            
+            try
+            {
+                string clipboardText = _clipboardData;
+                
+                // Try system clipboard if internal clipboard is empty
+                if (string.IsNullOrEmpty(clipboardText))
+                {
+                    if (Clipboard.ContainsText())
+                    {
+                        clipboardText = Clipboard.GetText();
+                    }
+                }
+                
+                if (string.IsNullOrEmpty(clipboardText))
+                {
+                    DebugLog("PasteCells - No clipboard data available");
+                    return;
+                }
+                
+                DebugLog($"PasteCells - Pasting data: {clipboardText.Replace('\n', '|').Replace('\t', ',')}");
+                
+                // Parse clipboard data
+                var rows = clipboardText.Split('\n');
+                var startRowIndex = dataGrid.Items.IndexOf(currentCell.Item);
+                var startColumnIndex = currentCell.Column.DisplayIndex;
+                
+                DebugLog($"PasteCells - Starting at row {startRowIndex}, column {startColumnIndex}");
+                
+                int pastedCells = 0;
+                
+                for (int rowOffset = 0; rowOffset < rows.Length; rowOffset++)
+                {
+                    var targetRowIndex = startRowIndex + rowOffset;
+                    if (targetRowIndex >= dataGrid.Items.Count) break;
+                    
+                    var scheduleRow = dataGrid.Items[targetRowIndex] as ScheduleRow;
+                    if (scheduleRow == null) continue;
+                    
+                    var cellValues = rows[rowOffset].Split('\t');
+                    
+                    for (int colOffset = 0; colOffset < cellValues.Length; colOffset++)
+                    {
+                        var targetColumnIndex = startColumnIndex + colOffset;
+                        if (targetColumnIndex >= dataGrid.Columns.Count) break;
+                        
+                        var column = dataGrid.Columns[targetColumnIndex] as DataGridBoundColumn;
+                        if (column == null) continue;
+                        
+                        var binding = column.Binding as System.Windows.Data.Binding;
+                        if (binding == null) continue;
+                        
+                        var fieldName = binding.Path.Path.Trim('[', ']');
+                        var newValue = cellValues[colOffset];
+                        
+                        // Set the value using the indexer
+                        scheduleRow[fieldName] = newValue;
+                        pastedCells++;
+                        
+                        DebugLog($"PasteCells - Set [{fieldName}] = '{newValue}' in row {targetRowIndex}");
+                    }
+                }
+                
+                DebugLog($"PasteCells - Successfully pasted {pastedCells} cells");
+                
+                // Refresh the DataGrid and Update Model button
+                dataGrid.Items.Refresh();
+                _viewModel.RefreshUpdateButtonState();
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"PasteCells - Error: {ex.Message}");
+            }
+        }
+        
+        #endregion
     }
 }
