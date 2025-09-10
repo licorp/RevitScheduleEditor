@@ -34,10 +34,15 @@
             <TextBlock Text="Text Filters" 
                        FontWeight="Bold" 
                        FontSize="14"/>
-            <TextBlock Text="💡 Uncheck items to hide them. Only checked items will be visible." 
+            <TextBlock Text="✅ Check items to SHOW them. Unchecked items will be HIDDEN." 
                        FontSize="11" 
                        Foreground="#666666" 
                        Margin="0,2,0,0"/>
+            <TextBlock Text="💡 Tip: Use 'None' button, then check only what you want to see." 
+                       FontSize="10" 
+                       Foreground="#888888" 
+                       FontStyle="Italic"
+                       Margin="0,1,0,0"/>
         </StackPanel>
         
         <!-- Search Box -->
@@ -97,16 +102,40 @@
                     <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
                 
-                <!-- Select All Checkbox -->
+                <!-- Select All Checkbox and Quick Actions -->
                 <Border Grid.Row="0" 
                         Background="#F5F5F5" 
                         BorderBrush="#CCCCCC" 
                         BorderThickness="0,0,0,1" 
                         Padding="4,2">
-                    <CheckBox x:Name="SelectAllCheckBox" 
-                              Content="(Select All)" 
-                              FontWeight="Bold"
-                              Click="SelectAllCheckBox_Click"/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        
+                        <CheckBox x:Name="SelectAllCheckBox" 
+                                  Grid.Column="0"
+                                  Content="(Select All)" 
+                                  FontWeight="Bold"
+                                  Click="SelectAllCheckBox_Click"/>
+                        
+                        <Button Grid.Column="1" 
+                                Content="Invert" 
+                                Margin="5,0,5,0"
+                                Padding="8,2"
+                                FontSize="10"
+                                Click="InvertSelectionButton_Click"
+                                ToolTip="Invert current selection"/>
+                        
+                        <Button Grid.Column="2" 
+                                Content="Clear All" 
+                                Padding="8,2"
+                                FontSize="10"
+                                Click="SelectNoneButton_Click"
+                                ToolTip="Uncheck all items (useful for selecting specific items)"/>
+                    </Grid>
                 </Border>
                 
                 <!-- Items ListBox -->

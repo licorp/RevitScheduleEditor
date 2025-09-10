@@ -30,8 +30,23 @@ namespace RevitScheduleEditor
             {
                 if (!_values.ContainsKey(fieldName) || _values[fieldName] != value)
                 {
+                    var oldValue = _values.ContainsKey(fieldName) ? _values[fieldName] : "null";
+                    System.Diagnostics.Debug.WriteLine($"ScheduleRow[{fieldName}] set to '{value}' (was '{oldValue}')");
                     _values[fieldName] = value;
+                    
+                    // Check if this is a new field not in _originalValues
+                    if (!_originalValues.ContainsKey(fieldName))
+                    {
+                        System.Diagnostics.Debug.WriteLine($"WARNING: Field '{fieldName}' not in originalValues. Adding with empty value.");
+                        _originalValues[fieldName] = string.Empty;
+                    }
+                    
+                    var originalValue = _originalValues[fieldName];
+                    var isNowModified = value != originalValue;
+                    System.Diagnostics.Debug.WriteLine($"ScheduleRow IsModified check: '{value}' != '{originalValue}' = {isNowModified}");
+                    
                     OnPropertyChanged(nameof(IsModified));
+                    System.Diagnostics.Debug.WriteLine($"ScheduleRow IsModified = {IsModified}");
                 }
             }
         }

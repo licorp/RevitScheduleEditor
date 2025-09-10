@@ -7,6 +7,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
+using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -430,6 +431,9 @@ namespace RevitScheduleEditor
             {
                 IsLoadingData = false;
                 DebugLog("=== LoadScheduleDataAsync Completed ===");
+                
+                // Refresh Update Model button state after data loading
+                RefreshUpdateButtonState();
             }
         }
 
@@ -804,7 +808,42 @@ namespace RevitScheduleEditor
             return cellInfos.All(c => c.Column == firstColumn);
         }
 
-        private bool CanUpdateModel(object obj) => _allScheduleData.Any(row => row.IsModified);
+        private bool CanUpdateModel(object obj) 
+        {
+            // Check ScheduleData instead of _allScheduleData since that's what's bound to DataGrid
+            if (ScheduleData == null)
+            {
+                DebugLog("CanUpdateModel: ScheduleData is null");
+                return false;
+            }
+            
+            var allRows = ScheduleData.Cast<ScheduleRow>().ToList();
+            var modifiedRows = allRows.Where(row => row.IsModified).ToList();
+            var canUpdate = modifiedRows.Any();
+            
+            DebugLog($"CanUpdateModel: Found {modifiedRows.Count} modified rows out of {allRows.Count} total rows, can update: {canUpdate}");
+            
+            // Debug: List first few modified rows for troubleshooting
+            if (modifiedRows.Any())
+            {
+                var firstModified = modifiedRows.Take(3);
+                foreach (var row in firstModified)
+                {
+                    var modifiedValues = row.GetModifiedValues();
+                    DebugLog($"CanUpdateModel: Modified row {row.Id} has {modifiedValues.Count} changed fields: {string.Join(", ", modifiedValues.Keys)}");
+                }
+            }
+            
+            return canUpdate;
+        }
+        
+        /// <summary>
+        /// Manually refresh the Update Model button state
+        /// </summary>
+        public void RefreshUpdateButtonState()
+        {
+            CommandManager.InvalidateRequerySuggested();
+        }
         
         private void UpdateModel(object obj)
         {
@@ -818,7 +857,8 @@ namespace RevitScheduleEditor
                     DebugLog("Transaction started");
                     
                     int updatedCount = 0;
-                    var changedRows = _allScheduleData.Where(row => row.IsModified).ToList();
+                    var allRows = ScheduleData?.Cast<ScheduleRow>().ToList() ?? new List<ScheduleRow>();
+                    var changedRows = allRows.Where(row => row.IsModified).ToList();
                     DebugLog($"Found {changedRows.Count} rows with modifications");
                     
                     foreach (var row in changedRows)
@@ -896,7 +936,7 @@ namespace RevitScheduleEditor
 
         #region Excel-like Features
 
-        // Copy functionality
+        // Copy functionality - Enhanced for better Excel-like experience
         private void ExecuteCopy(object parameter)
         {
             var selectedCells = parameter as IList;
@@ -905,81 +945,214 @@ namespace RevitScheduleEditor
             var cellInfos = selectedCells.Cast<DataGridCellInfo>().ToList();
             if (cellInfos.Count == 0) return;
 
-            // Group cells by row and column to create 2D array
-            var rowGroups = cellInfos.GroupBy(c => c.Item).ToList();
-            var colGroups = cellInfos.GroupBy(c => c.Column).ToList();
-            
-            _clipboardData = new string[rowGroups.Count, colGroups.Count];
-            
-            var rowIndex = 0;
-            foreach (var rowGroup in rowGroups)
+            DebugLog($"Copy: Processing {cellInfos.Count} selected cells");
+
+            try
             {
-                var colIndex = 0;
-                foreach (var colGroup in colGroups)
+                // Sort cells by row and column to maintain proper order
+                var sortedCells = cellInfos
+                    .Where(c => c.Item is ScheduleRow && c.Column is DataGridBoundColumn)
+                    .OrderBy(c => ScheduleData.IndexOf((ScheduleRow)c.Item))
+                    .ThenBy(c => GetColumnIndex(c.Column))
+                    .ToList();
+
+                if (!sortedCells.Any())
                 {
-                    var cell = cellInfos.FirstOrDefault(c => c.Item == rowGroup.Key && c.Column == colGroup.Key);
-                    if (cell.Item is ScheduleRow row && cell.Column is DataGridBoundColumn boundCol)
+                    DebugLog("Copy: No valid cells to copy");
+                    return;
+                }
+
+                // Create clipboard data as tab-separated string (Excel format)
+                var clipboardText = new StringBuilder();
+                var lastRowIndex = -1;
+                
+                foreach (var cell in sortedCells)
+                {
+                    var row = (ScheduleRow)cell.Item;
+                    var currentRowIndex = ScheduleData.IndexOf(row);
+                    
+                    // Add new line if we're on a different row
+                    if (lastRowIndex != -1 && currentRowIndex != lastRowIndex)
+                    {
+                        clipboardText.AppendLine();
+                    }
+                    
+                    // Add tab separator if not the first cell in the row
+                    if (lastRowIndex == currentRowIndex && clipboardText.Length > 0 && 
+                        !clipboardText.ToString().EndsWith("\r\n") && !clipboardText.ToString().EndsWith("\n"))
+                    {
+                        clipboardText.Append("\t");
+                    }
+                    
+                    // Get cell value
+                    if (cell.Column is DataGridBoundColumn boundCol)
                     {
                         var bindingPath = (boundCol.Binding as System.Windows.Data.Binding)?.Path.Path;
                         if (!string.IsNullOrEmpty(bindingPath))
                         {
                             string columnName = bindingPath.Trim('[', ']');
-                            _clipboardData[rowIndex, colIndex] = row[columnName] ?? string.Empty;
+                            string cellValue = row[columnName] ?? string.Empty;
+                            clipboardText.Append(cellValue);
                         }
                     }
-                    colIndex++;
+                    
+                    lastRowIndex = currentRowIndex;
                 }
-                rowIndex++;
+
+                // Copy to Windows clipboard
+                var textToCopy = clipboardText.ToString();
+                if (!string.IsNullOrEmpty(textToCopy))
+                {
+                    Clipboard.SetText(textToCopy);
+                    DebugLog($"Copy: Copied text to clipboard: {textToCopy.Length} characters");
+                    
+                    // Also store in internal clipboard for paste functionality
+                    _clipboardData = ParseClipboardText(textToCopy);
+                }
             }
+            catch (Exception ex)
+            {
+                DebugLog($"Copy error: {ex.Message}");
+                MessageBox.Show($"Copy failed: {ex.Message}", "Copy Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+
+        // Helper method to parse clipboard text into 2D array
+        private string[,] ParseClipboardText(string text)
+        {
+            var lines = text.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+            if (lines.Length == 0) return null;
+            
+            var maxCols = lines.Max(line => line.Split('\t').Length);
+            var result = new string[lines.Length, maxCols];
+            
+            for (int row = 0; row < lines.Length; row++)
+            {
+                var cols = lines[row].Split('\t');
+                for (int col = 0; col < maxCols; col++)
+                {
+                    result[row, col] = col < cols.Length ? cols[col] : string.Empty;
+                }
+            }
+            
+            return result;
         }
 
         private bool CanExecuteCopy(object parameter)
         {
             var selectedCells = parameter as IList;
-            return selectedCells != null && selectedCells.Count > 0;
+            bool canCopy = selectedCells != null && selectedCells.Count > 0;
+            DebugLog($"CanExecuteCopy - Selected cells: {selectedCells?.Count ?? 0}, Can copy: {canCopy}");
+            return canCopy;
         }
 
-        // Paste functionality
+        // Paste functionality - Enhanced to handle both internal and external clipboard
         private void ExecutePaste(object parameter)
         {
             var selectedCells = parameter as IList;
-            if (selectedCells == null || _clipboardData == null) return;
+            if (selectedCells == null) return;
             
             var cellInfos = selectedCells.Cast<DataGridCellInfo>().ToList();
             if (cellInfos.Count == 0) return;
 
-            SaveStateForUndo();
+            DebugLog($"Paste: Processing {cellInfos.Count} selected cells");
 
-            var startCell = cellInfos.First();
-            if (!(startCell.Item is ScheduleRow startRow)) return;
-
-            var startRowIndex = ScheduleData.IndexOf(startRow);
-            var startColIndex = GetColumnIndex(startCell.Column);
-            
-            if (startRowIndex < 0 || startColIndex < 0) return;
-
-            var clipRows = _clipboardData.GetLength(0);
-            var clipCols = _clipboardData.GetLength(1);
-
-            for (int r = 0; r < clipRows && startRowIndex + r < ScheduleData.Count; r++)
+            try
             {
-                for (int c = 0; c < clipCols; c++)
+                string[,] clipboardData = null;
+                
+                // Try to get data from Windows clipboard first
+                if (Clipboard.ContainsText())
                 {
-                    var targetRow = ScheduleData[startRowIndex + r];
-                    var targetColName = GetColumnNameByIndex(startColIndex + c);
-                    
-                    if (!string.IsNullOrEmpty(targetColName))
+                    var clipboardText = Clipboard.GetText();
+                    clipboardData = ParseClipboardText(clipboardText);
+                    DebugLog($"Paste: Got clipboard text: {clipboardText.Length} characters");
+                }
+                
+                // Fall back to internal clipboard
+                if (clipboardData == null)
+                {
+                    clipboardData = _clipboardData;
+                }
+                
+                if (clipboardData == null) 
+                {
+                    DebugLog("Paste: No clipboard data available");
+                    return;
+                }
+
+                SaveStateForUndo();
+
+                // Find the top-left cell of selection
+                var startCell = cellInfos
+                    .OrderBy(c => ScheduleData.IndexOf((ScheduleRow)c.Item))
+                    .ThenBy(c => GetColumnIndex(c.Column))
+                    .First();
+
+                if (!(startCell.Item is ScheduleRow startRow)) return;
+
+                var startRowIndex = ScheduleData.IndexOf(startRow);
+                var startColIndex = GetColumnIndex(startCell.Column);
+                
+                if (startRowIndex < 0 || startColIndex < 0) 
+                {
+                    DebugLog($"Paste: Invalid start position - row: {startRowIndex}, col: {startColIndex}");
+                    return;
+                }
+
+                var clipRows = clipboardData.GetLength(0);
+                var clipCols = clipboardData.GetLength(1);
+                var pastedCount = 0;
+
+                DebugLog($"Paste: Clipboard data size: {clipRows}x{clipCols}, starting at row {startRowIndex}, col {startColIndex}");
+
+                // Paste data
+                for (int r = 0; r < clipRows && startRowIndex + r < ScheduleData.Count; r++)
+                {
+                    for (int c = 0; c < clipCols; c++)
                     {
-                        targetRow[targetColName] = _clipboardData[r, c];
+                        var targetRow = ScheduleData[startRowIndex + r];
+                        var targetColName = GetColumnNameByIndex(startColIndex + c);
+                        
+                        if (!string.IsNullOrEmpty(targetColName))
+                        {
+                            var newValue = clipboardData[r, c];
+                            targetRow[targetColName] = newValue;
+                            pastedCount++;
+                        }
                     }
                 }
+                
+                DebugLog($"Paste: Successfully pasted {pastedCount} values");
+                
+                // Refresh Update Model button state after paste
+                RefreshUpdateButtonState();
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"Paste error: {ex.Message}");
+                MessageBox.Show($"Paste failed: {ex.Message}", "Paste Error", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
         }
 
         private bool CanExecutePaste(object parameter)
         {
             var selectedCells = parameter as IList;
-            return selectedCells != null && selectedCells.Count > 0 && _clipboardData != null;
+            bool hasSelection = selectedCells != null && selectedCells.Count > 0;
+            
+            bool hasClipboardData = false;
+            try
+            {
+                hasClipboardData = _clipboardData != null || Clipboard.ContainsText();
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"CanExecutePaste - Clipboard access error: {ex.Message}");
+                hasClipboardData = _clipboardData != null;
+            }
+            
+            DebugLog($"CanExecutePaste - Selection: {hasSelection}, Clipboard: {hasClipboardData}");
+            return hasSelection && hasClipboardData;
         }
 
         // Cut functionality

@@ -115,8 +115,48 @@ namespace RevitScheduleEditor
             {
                 if (e.EditAction == DataGridEditAction.Commit)
                 {
+                    DebugLog($"CellEditEnding - Committing edit for column: {e.Column?.Header}");
+                    
                     // Update will be handled by binding automatically
+                    // Refresh Update Model button state after edit
+                    Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        DebugLog("CellEditEnding - Refreshing Update Model button state");
+                        _viewModel.RefreshUpdateButtonState();
+                        
+                        // Also log current modified count for debugging
+                        var modifiedCount = _viewModel.ScheduleData?.Count(row => row.IsModified) ?? 0;
+                        DebugLog($"CellEditEnding - Modified rows count: {modifiedCount}");
+                    }), System.Windows.Threading.DispatcherPriority.Background);
                 }
+                else
+                {
+                    DebugLog($"CellEditEnding - Edit cancelled for column: {e.Column?.Header}");
+                }
+            };
+
+            // Add more debug events
+            dataGrid.BeginningEdit += (sender, e) =>
+            {
+                DebugLog($"BeginningEdit - Starting edit for column: {e.Column?.Header}, Row: {dataGrid.Items.IndexOf(e.Row.Item)}");
+            };
+
+            dataGrid.PreparingCellForEdit += (sender, e) =>
+            {
+                DebugLog($"PreparingCellForEdit - Column: {e.Column?.Header}");
+            };
+
+            // Add selection debugging
+            dataGrid.SelectionChanged += (sender, e) =>
+            {
+                var selectedCellsCount = dataGrid.SelectedCells?.Count ?? 0;
+                var selectedItemsCount = dataGrid.SelectedItems?.Count ?? 0;
+                DebugLog($"SelectionChanged - SelectedCells: {selectedCellsCount}, SelectedItems: {selectedItemsCount}");
+            };
+
+            dataGrid.CurrentCellChanged += (sender, e) =>
+            {
+                DebugLog($"CurrentCellChanged - Current cell: {dataGrid.CurrentCell.Column?.Header}");
             };
 
             // Handle Enter key to move to next cell (like Excel)
@@ -221,7 +261,7 @@ namespace RevitScheduleEditor
                 var column = new DataGridTextColumn
                 {
                     Header = fieldName,
-                    Binding = new System.Windows.Data.Binding($"[{fieldName}]") { Mode = BindingMode.TwoWay, UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged },
+                    Binding = new System.Windows.Data.Binding($"[{fieldName}]") { Mode = BindingMode.TwoWay, UpdateSourceTrigger = UpdateSourceTrigger.LostFocus },
                     CellStyle = excelCellStyle,  // Apply Excel-like style with fill handle
                     HeaderStyle = filterHeaderStyle  // Apply integrated filter header style
                 };
@@ -274,215 +314,6 @@ namespace RevitScheduleEditor
             ShowFilterPopup(button, columnName);
         }
 
-        // Test button to verify filter functionality
-        private void TestFilterButton_Click(object sender, RoutedEventArgs e)
-        {
-            DebugLog("TestFilterButton_Click - Started");
-            
-            try
-            {
-                // Test data
-                var testValues = new List<string>
-                {
-                    "420.05.010d",
-                    "420.05.013a", 
-                    "420.05.111",
-                    "420.08.002",
-                    "420.08.040",
-                    "420.11.001",
-                    "420.11.022",
-                    "420.11.024"
-                };
-
-                // Pre-select only some items to demonstrate filtering
-                var preSelectedValues = new List<string>
-                {
-                    "420.05.010d",
-                    "420.05.111",
-                    "420.11.001"
-                };
-
-                DebugLog($"TestFilterButton_Click - Creating TextFiltersWindow with {testValues.Count} test values, {preSelectedValues.Count} pre-selected");
-                
-                var filterWindow = new TextFiltersWindow()
-                {
-                    Owner = this
-                };
-                
-                // Set filter data using the new method
-                filterWindow.SetFilterData(testValues, new HashSet<string>(preSelectedValues));
-
-                DebugLog("TestFilterButton_Click - Showing dialog");
-                
-                if (filterWindow.ShowDialog() == true)
-                {
-                    var results = filterWindow.SelectedValues;
-                    DebugLog($"TestFilterButton_Click - Dialog OK, selected {results.Count} items");
-                    MessageBox.Show($"Filter Test Successful!\nSelected {results.Count} items:\n{string.Join("\n", results.Take(5))}{(results.Count > 5 ? "\n..." : "")}", 
-                                  "Filter Test Result", 
-                                  MessageBoxButton.OK, 
-                                  MessageBoxImage.Information);
-                }
-                else
-                {
-                    DebugLog("TestFilterButton_Click - Dialog was cancelled");
-                    MessageBox.Show("Filter test was cancelled.", "Filter Test", MessageBoxButton.OK, MessageBoxImage.Information);
-                }
-            }
-            catch (Exception ex)
-            {
-                DebugLog($"TestFilterButton_Click - Exception: {ex.Message}");
-                MessageBox.Show($"Filter Test Error:\n{ex.Message}\n\nStackTrace:\n{ex.StackTrace}", 
-                              "Filter Test Error", 
-                              MessageBoxButton.OK, 
-                              MessageBoxImage.Error);
-            }
-        }
-
-        // Test real filter functionality on loaded data
-        private void TestRealFilterButton_Click(object sender, RoutedEventArgs e)
-        {
-            DebugLog("TestRealFilterButton_Click - Started");
-            
-            if (_viewModel?.ScheduleData == null || _viewModel.ScheduleData.Count == 0)
-            {
-                MessageBox.Show("No data loaded. Please load a schedule first.", "Test Real Filter", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
-
-            try
-            {
-                // Get first column with data to test filter
-                var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
-                if (dataGrid == null || dataGrid.Columns.Count == 0)
-                {
-                    MessageBox.Show("No columns available for testing.", "Test Real Filter", MessageBoxButton.OK, MessageBoxImage.Warning);
-                    return;
-                }
-
-                var firstColumn = dataGrid.Columns.FirstOrDefault();
-                string columnName = firstColumn?.Header?.ToString();
-                
-                if (string.IsNullOrEmpty(columnName))
-                {
-                    MessageBox.Show("First column has no header.", "Test Real Filter", MessageBoxButton.OK, MessageBoxImage.Warning);
-                    return;
-                }
-
-                DebugLog($"TestRealFilterButton_Click - Testing filter on column: {columnName}");
-                
-                // Manually trigger filter for first column
-                ShowFilterPopup(null, columnName);
-            }
-            catch (Exception ex)
-            {
-                DebugLog($"TestRealFilterButton_Click - Exception: {ex.Message}");
-                MessageBox.Show($"Real Filter Test Error:\n{ex.Message}", "Test Real Filter Error", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
-
-        // Demo filter với partial selection để show cách hoạt động
-        private void DemoFilterButton_Click(object sender, RoutedEventArgs e)
-        {
-            DebugLog("DemoFilterButton_Click - Started");
-            
-            if (_viewModel?.ScheduleData == null || _viewModel.ScheduleData.Count == 0)
-            {
-                MessageBox.Show("No data loaded. Please load a schedule first.", "Demo Filter", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
-
-            try
-            {
-                // Get first column with data
-                var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
-                if (dataGrid == null || dataGrid.Columns.Count == 0)
-                {
-                    MessageBox.Show("No columns available for demo.", "Demo Filter", MessageBoxButton.OK, MessageBoxImage.Warning);
-                    return;
-                }
-
-                var firstColumn = dataGrid.Columns.FirstOrDefault();
-                string columnName = firstColumn?.Header?.ToString();
-                
-                if (string.IsNullOrEmpty(columnName))
-                {
-                    MessageBox.Show("First column has no header.", "Demo Filter", MessageBoxButton.OK, MessageBoxImage.Warning);
-                    return;
-                }
-
-                // Get unique values for this column
-                var uniqueValues = new List<string>();
-                
-                if (columnName == "Element ID")
-                {
-                    uniqueValues = _viewModel.ScheduleData
-                        .Select(row => row.GetElement().Id.IntegerValue.ToString())
-                        .Distinct()
-                        .OrderBy(v => long.Parse(v))
-                        .ToList();
-                }
-                else
-                {
-                    uniqueValues = _viewModel.ScheduleData
-                        .Select(row => row.Values.ContainsKey(columnName) ? row.Values[columnName] : "")
-                        .Where(v => !string.IsNullOrEmpty(v))
-                        .Distinct()
-                        .OrderBy(v => v)
-                        .ToList();
-                }
-
-                if (uniqueValues.Count == 0)
-                {
-                    MessageBox.Show("No values found for demo.", "Demo Filter", MessageBoxButton.OK, MessageBoxImage.Warning);
-                    return;
-                }
-
-                // Select only first 30% of items for demo
-                var demoSelectedCount = Math.Max(1, uniqueValues.Count / 3);
-                var demoSelected = uniqueValues.Take(demoSelectedCount).ToList();
-
-                DebugLog($"DemoFilterButton_Click - Demo filter on column '{columnName}' with {demoSelected.Count} of {uniqueValues.Count} items selected");
-                
-                var filterWindow = new TextFiltersWindow()
-                {
-                    Owner = this
-                };
-                
-                // Set filter data using the new method
-                filterWindow.SetFilterData(uniqueValues, new HashSet<string>(demoSelected));
-
-                if (filterWindow.ShowDialog() == true)
-                {
-                    var selectedValues = filterWindow.SelectedValues;
-                    
-                    if (selectedValues.Count == 0)
-                    {
-                        _columnFilters.Remove(columnName);
-                        DebugLog($"DemoFilterButton_Click - No items selected, removed filter");
-                    }
-                    else if (selectedValues.Count == uniqueValues.Count)
-                    {
-                        _columnFilters.Remove(columnName);
-                        DebugLog($"DemoFilterButton_Click - All items selected, removed filter");
-                    }
-                    else
-                    {
-                        _columnFilters[columnName] = new HashSet<string>(selectedValues);
-                        DebugLog($"DemoFilterButton_Click - Applied demo filter with {selectedValues.Count} items");
-                    }
-
-                    UpdateColumnHeaderFilterStatus(columnName, _columnFilters.ContainsKey(columnName));
-                    ApplyFilters();
-                }
-            }
-            catch (Exception ex)
-            {
-                DebugLog($"DemoFilterButton_Click - Exception: {ex.Message}");
-                MessageBox.Show($"Demo Filter Error:\n{ex.Message}", "Demo Filter Error", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
-
         private void ShowFilterPopup(Button button, string columnName)
         {
             DebugLog($"ShowFilterPopup - Started for column: {columnName}");
@@ -507,12 +338,13 @@ namespace RevitScheduleEditor
             }
             else
             {
-                // Regular column values
+                // Regular column values - normalize them for consistent filtering
                 uniqueValues = _viewModel.ScheduleData
                     .Select(row => row.Values.ContainsKey(columnName) ? row.Values[columnName] : "")
                     .Where(v => !string.IsNullOrEmpty(v))
-                    .Distinct()
-                    .OrderBy(v => v)
+                    .Select(v => (v ?? "").Trim()) // Normalize by trimming whitespace
+                    .Distinct(StringComparer.OrdinalIgnoreCase) // Case-insensitive distinct
+                    .OrderBy(v => v, StringComparer.OrdinalIgnoreCase) // Case-insensitive sort
                     .ToList();
             }
 
@@ -554,9 +386,9 @@ namespace RevitScheduleEditor
                     
                     if (selectedValues.Count == 0)
                     {
-                        // No items selected - show all (remove filter)
-                        _columnFilters.Remove(columnName);
-                        DebugLog($"ShowFilterPopup - No items selected, removed filter for {columnName}");
+                        // No items selected - hide all (create empty filter)
+                        _columnFilters[columnName] = new HashSet<string>(); // Empty set = hide all
+                        DebugLog($"ShowFilterPopup - No items selected, created empty filter for {columnName} (hide all)");
                     }
                     else if (selectedValues.Count == uniqueValues.Count)
                     {
@@ -1044,12 +876,33 @@ namespace RevitScheduleEditor
             var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
             if (dataGrid == null) return;
 
-            // Double-click autofill 
+            // Double-click behavior: Edit mode for single cell, autofill for multiple cells
             dataGrid.MouseDoubleClick += (sender, e) =>
             {
+                DebugLog($"MouseDoubleClick - SelectedCells count: {dataGrid.SelectedCells.Count}");
+                
                 if (dataGrid.SelectedCells.Count > 1)
                 {
+                    DebugLog("MouseDoubleClick - Multiple cells selected, triggering autofill");
                     _viewModel.AutofillCommand.Execute(dataGrid.SelectedCells);
+                }
+                else if (dataGrid.SelectedCells.Count == 1)
+                {
+                    DebugLog("MouseDoubleClick - Single cell selected, entering edit mode");
+                    // For single cell, enter edit mode
+                    try
+                    {
+                        dataGrid.BeginEdit();
+                        DebugLog("MouseDoubleClick - BeginEdit() called successfully");
+                    }
+                    catch (Exception ex)
+                    {
+                        DebugLog($"MouseDoubleClick - Error calling BeginEdit(): {ex.Message}");
+                    }
+                }
+                else
+                {
+                    DebugLog("MouseDoubleClick - No cells selected");
                 }
             };
 
@@ -1247,6 +1100,7 @@ namespace RevitScheduleEditor
 
                 // Create filtered collection
                 var filteredData = _viewModel.ScheduleData.AsEnumerable();
+                int debugRowCount = 0; // Counter for debug logging
                 
                 foreach (var filter in _columnFilters)
                 {
@@ -1268,7 +1122,23 @@ namespace RevitScheduleEditor
                             cellValue = row.Values[columnName];
                         }
 
-                        bool isIncluded = allowedValues.Contains(cellValue);
+                        // Normalize values for comparison (trim whitespace, handle null/empty)
+                        string normalizedCellValue = (cellValue ?? "").Trim();
+                        
+                        // Check if the normalized cell value is in the allowed values
+                        // Use case-insensitive comparison and also check trimmed versions
+                        bool isIncluded = allowedValues.Any(allowed => 
+                            string.Equals((allowed ?? "").Trim(), normalizedCellValue, StringComparison.OrdinalIgnoreCase));
+                        
+                        // Debug log for first few rows to see what's happening
+                        if (debugRowCount < 5)
+                        {
+                            DebugLog($"ApplyFilters - Row {debugRowCount}: Column='{columnName}'");
+                            DebugLog($"ApplyFilters - Original CellValue='{cellValue}', Normalized='{normalizedCellValue}', IsIncluded={isIncluded}");
+                            DebugLog($"ApplyFilters - AllowedValues: [{string.Join(", ", allowedValues.Select(v => $"'{v}'").Take(5))}{(allowedValues.Count > 5 ? "..." : "")}]");
+                            debugRowCount++;
+                        }
+                        
                         return isIncluded;
                     });
                 }

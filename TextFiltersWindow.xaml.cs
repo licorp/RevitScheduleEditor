@@ -37,12 +37,18 @@ namespace RevitScheduleEditor
             // Create FilterItem objects for all unique values
             _allItems = new ObservableCollection<FilterItem>();
             
+            // Logic for default selection:
+            // - If currentFilter exists, use it (restore previous filter state)
+            // - If no currentFilter, start with all UNCHECKED for clearer filtering workflow
+            // User can use "Select All" button if they want to check everything
+            bool defaultSelection = false; // Start with nothing selected for clearer workflow
+            
             foreach (var value in uniqueValues.OrderBy(v => v))
             {
                 var item = new FilterItem
                 {
                     Value = value,
-                    IsSelected = currentFilter?.Contains(value) ?? true // Default to selected if no current filter
+                    IsSelected = currentFilter?.Contains(value) ?? defaultSelection
                 };
                 
                 item.PropertyChanged += FilterItem_PropertyChanged;
@@ -176,6 +182,44 @@ namespace RevitScheduleEditor
             }
         }
 
+        private void InvertSelectionButton_Click(object sender, RoutedEventArgs e)
+        {
+            // Temporarily unsubscribe from events to avoid triggering updates
+            foreach (var item in FilteredItems)
+            {
+                item.PropertyChanged -= FilterItem_PropertyChanged;
+                item.IsSelected = !item.IsSelected;
+                item.PropertyChanged += FilterItem_PropertyChanged;
+            }
+            
+            // Update the underlying collection as well
+            foreach (var item in _allItems.Where(item => FilteredItems.Contains(item)))
+            {
+                item.IsSelected = !item.IsSelected;
+            }
+            
+            UpdateSelectAllState();
+        }
+
+        private void SelectNoneButton_Click(object sender, RoutedEventArgs e)
+        {
+            // Temporarily unsubscribe from events to avoid triggering updates
+            foreach (var item in FilteredItems)
+            {
+                item.PropertyChanged -= FilterItem_PropertyChanged;
+                item.IsSelected = false;
+                item.PropertyChanged += FilterItem_PropertyChanged;
+            }
+            
+            // Update the underlying collection as well
+            foreach (var item in _allItems.Where(item => FilteredItems.Contains(item)))
+            {
+                item.IsSelected = false;
+            }
+            
+            UpdateSelectAllState();
+        }
+
         private void SearchTextBox_TextChanged(object sender, TextChangedEventArgs e)
         {
             // SearchText binding will handle the filtering
@@ -186,24 +230,8 @@ namespace RevitScheduleEditor
             var selectedCount = _allItems.Count(item => item.IsSelected);
             var totalCount = _allItems?.Count ?? 0;
             
-            // Warn user if all items are selected (no filter effect)
-            if (selectedCount == totalCount)
-            {
-                var result = MessageBox.Show(
-                    "All items are selected, so no filtering will be applied.\n\n" +
-                    "To filter data:\n" +
-                    "• UNCHECK items you want to HIDE\n" +
-                    "• Only CHECKED items will remain VISIBLE\n\n" +
-                    "Continue anyway?",
-                    "No Filter Applied",
-                    MessageBoxButton.YesNo,
-                    MessageBoxImage.Information);
-                    
-                if (result == MessageBoxResult.No)
-                {
-                    return; // Stay in dialog
-                }
-            }
+            // Note: Removed intrusive warning dialog that was interrupting user workflow
+            // Users can apply "no filter" (all selected) if they want to see all data
             
             // Get selected values from all items (not just filtered)
             SelectedValues = _allItems.Where(item => item.IsSelected)
@@ -218,6 +246,27 @@ namespace RevitScheduleEditor
         {
             DialogResult = false;
             Close();
+        }
+
+        private void UpdateSelectAllState()
+        {
+            if (SelectAllCheckBox == null || _allItems == null) return;
+            
+            var selectedCount = _allItems.Count(item => item.IsSelected);
+            var totalCount = _allItems.Count;
+            
+            if (selectedCount == 0)
+            {
+                SelectAllCheckBox.IsChecked = false;
+            }
+            else if (selectedCount == totalCount)
+            {
+                SelectAllCheckBox.IsChecked = true;
+            }
+            else
+            {
+                SelectAllCheckBox.IsChecked = null; // Indeterminate state
+            }
         }
 
         public event PropertyChangedEventHandler PropertyChanged;

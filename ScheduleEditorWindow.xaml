@@ -242,30 +242,6 @@
                     Command="{Binding ExportCommand}"
                     ToolTip="Export current data to Excel file"
                     Style="{DynamicResource ColoredButtonStyle}"/>
-            
-            <!-- Test Filter Button -->
-            <Button Content="Test Filter" Margin="15,0,0,0" Padding="8,6" Height="32" Width="90"
-                    Background="#9C27B0" Foreground="White" FontWeight="SemiBold"
-                    BorderBrush="#7B1FA2" BorderThickness="1"
-                    Click="TestFilterButton_Click"
-                    ToolTip="Test Text Filters functionality"
-                    Style="{DynamicResource ColoredButtonStyle}"/>
-            
-            <!-- Test Real Filter Button -->
-            <Button Content="Test Real" Margin="5,0,0,0" Padding="8,6" Height="32" Width="80"
-                    Background="#E91E63" Foreground="White" FontWeight="SemiBold"
-                    BorderBrush="#C2185B" BorderThickness="1"
-                    Click="TestRealFilterButton_Click"
-                    ToolTip="Test filter on actual loaded data"
-                    Style="{DynamicResource ColoredButtonStyle}"/>
-            
-            <!-- Demo Filter Button -->
-            <Button Content="Demo" Margin="5,0,0,0" Padding="8,6" Height="32" Width="60"
-                    Background="#FF5722" Foreground="White" FontWeight="SemiBold"
-                    BorderBrush="#D84315" BorderThickness="1"
-                    Click="DemoFilterButton_Click"
-                    ToolTip="Demo filter with partial selection"
-                    Style="{DynamicResource ColoredButtonStyle}"/>
         </StackPanel>
 
         <!-- DataGrid với filter buttons integrated trong column headers -->
@@ -331,10 +307,24 @@
                             Value="{Binding LoadingProgress}" Maximum="100"
                             VerticalAlignment="Center"/>
                 
+                <!-- Enhanced Update Model Button -->
                 <Button Grid.Column="2" 
-                        Content="Update Model" 
-                        Padding="12,4"
-                        Command="{Binding UpdateModelCommand}"/>
+                        Content="🔄 Update Model" 
+                        Padding="16,8"
+                        Height="36"
+                        Background="#4CAF50"
+                        Foreground="White"
+                        FontWeight="SemiBold"
+                        FontSize="13"
+                        BorderBrush="#45A049"
+                        BorderThickness="1"
+                        Command="{Binding UpdateModelCommand}"
+                        ToolTip="Save changes back to Revit model"
+                        Style="{DynamicResource ColoredButtonStyle}">
+                    <Button.Effect>
+                        <DropShadowEffect Color="Black" Opacity="0.2" ShadowDepth="2" BlurRadius="4"/>
+                    </Button.Effect>
+                </Button>
             </Grid>
         </Border>
     </Grid>
