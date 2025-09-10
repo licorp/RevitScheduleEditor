@@ -285,6 +285,29 @@ namespace RevitScheduleEditor
             
             // Add column header click handler for selecting entire column
             dataGrid.PreviewMouseLeftButtonDown += DataGrid_PreviewMouseLeftButtonDown;
+            
+            // Add Ctrl+C handler for copy functionality
+            dataGrid.PreviewKeyDown += (sender, e) =>
+            {
+                if (e.Key == Key.C && Keyboard.Modifiers == ModifierKeys.Control)
+                {
+                    DebugLog("Ctrl+C pressed - Using native DataGrid copy");
+                    try
+                    {
+                        // Let DataGrid handle the copy with its built-in functionality
+                        ApplicationCommands.Copy.Execute(null, dataGrid);
+                        e.Handled = true;
+                        DebugLog("Native DataGrid copy executed successfully");
+                    }
+                    catch (Exception ex)
+                    {
+                        DebugLog($"Native DataGrid copy failed: {ex.Message}");
+                        // Fallback to custom copy
+                        CopyCells();
+                        e.Handled = true;
+                    }
+                }
+            };
         }
 
         // Event handler for column header click - select entire column
@@ -325,12 +348,98 @@ namespace RevitScheduleEditor
                 
                 DebugLog($"DataGrid_PreviewMouseLeftButtonDown - Selected {dataGrid.SelectedCells.Count} cells in column {columnHeader.Column.Header}");
                 
+                // Auto-copy column values to clipboard
+                CopyColumnToClipboard(dataGrid, columnHeader.Column);
+                
                 // Prevent further processing to avoid other click behaviors
                 e.Handled = true;
             }
             catch (Exception ex)
             {
                 DebugLog($"DataGrid_PreviewMouseLeftButtonDown - Error: {ex.Message}");
+            }
+        }
+
+        // Copy column values to clipboard
+        private void CopyColumnToClipboard(DataGrid dataGrid, DataGridColumn column)
+        {
+            try
+            {
+                var columnValues = new List<string>();
+                
+                // Add column header
+                string columnHeader = column.Header?.ToString() ?? "Column";
+                columnValues.Add(columnHeader);
+                
+                // Get column binding path to extract values
+                var binding = (column as DataGridBoundColumn)?.Binding as System.Windows.Data.Binding;
+                if (binding?.Path?.Path == null)
+                {
+                    DebugLog("CopyColumnToClipboard - Could not get column binding path");
+                    return;
+                }
+                
+                string propertyPath = binding.Path.Path;
+                DebugLog($"CopyColumnToClipboard - Extracting values for property: {propertyPath}");
+                
+                // Extract values from each row
+                foreach (var item in dataGrid.Items)
+                {
+                    if (item == null) continue;
+                    
+                    try
+                    {
+                        // Use reflection to get property value
+                        var property = item.GetType().GetProperty(propertyPath);
+                        if (property != null)
+                        {
+                            var value = property.GetValue(item);
+                            string cellValue = value?.ToString() ?? "";
+                            columnValues.Add(cellValue);
+                        }
+                        else
+                        {
+                            columnValues.Add("");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        DebugLog($"CopyColumnToClipboard - Error getting value for row: {ex.Message}");
+                        columnValues.Add("");
+                    }
+                }
+                
+                // Join all values with newlines and copy to clipboard
+                string clipboardText = string.Join("\n", columnValues);
+                System.Windows.Clipboard.SetText(clipboardText);
+                
+                DebugLog($"CopyColumnToClipboard - Copied {columnValues.Count} values to clipboard for column '{columnHeader}'");
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"CopyColumnToClipboard - Error: {ex.Message}");
+            }
+        }
+
+        // Context menu handler for copying column
+        private void CopyColumn_Click(object sender, RoutedEventArgs e)
+        {
+            var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
+            if (dataGrid?.SelectedCells == null || dataGrid.SelectedCells.Count == 0)
+            {
+                DebugLog("CopyColumn_Click - No cells selected");
+                return;
+            }
+
+            // Get the column from the first selected cell
+            var firstCell = dataGrid.SelectedCells[0];
+            if (firstCell.Column != null)
+            {
+                CopyColumnToClipboard(dataGrid, firstCell.Column);
+            }
+            else
+            {
+                DebugLog("CopyColumn_Click - Could not determine column from selected cell");
             }
         }
 
@@ -1411,9 +1520,32 @@ namespace RevitScheduleEditor
                             var binding = column.Binding as System.Windows.Data.Binding;
                             if (binding != null)
                             {
-                                var fieldName = binding.Path.Path.Trim('[', ']');
-                                var value = scheduleRow[fieldName] ?? "";
-                                rowValues.Add(value);
+                                var originalPath = binding.Path.Path;
+                                var fieldName = originalPath.Trim('[', ']');
+                                DebugLog($"CopyCells - Original binding path: '{originalPath}', Field name: '{fieldName}'");
+                                
+                                var value = scheduleRow[fieldName];
+                                DebugLog($"CopyCells - ScheduleRow has key '{fieldName}': {scheduleRow.Values?.ContainsKey(fieldName)}");
+                                
+                                if (string.IsNullOrEmpty(value))
+                                {
+                                    // Try alternative access methods
+                                    try
+                                    {
+                                        var property = scheduleRow.GetType().GetProperty(fieldName);
+                                        if (property != null)
+                                        {
+                                            value = property.GetValue(scheduleRow)?.ToString() ?? "";
+                                            DebugLog($"CopyCells - Got value via reflection: '{value}'");
+                                        }
+                                    }
+                                    catch (Exception reflEx)
+                                    {
+                                        DebugLog($"CopyCells - Reflection failed: {reflEx.Message}");
+                                    }
+                                }
+                                
+                                rowValues.Add(value ?? "");
                                 DebugLog($"CopyCells - Cell [{fieldName}] = '{value}'");
                             }
                         }
