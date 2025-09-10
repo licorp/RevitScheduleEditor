@@ -282,6 +282,56 @@ namespace RevitScheduleEditor
                     dataGrid.BeginEdit();
                 }
             };
+            
+            // Add column header click handler for selecting entire column
+            dataGrid.PreviewMouseLeftButtonDown += DataGrid_PreviewMouseLeftButtonDown;
+        }
+
+        // Event handler for column header click - select entire column
+        private void DataGrid_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            var dataGrid = sender as DataGrid;
+            if (dataGrid == null) return;
+            
+            // Check if click is on a column header
+            var hitTest = VisualTreeHelper.HitTest(dataGrid, e.GetPosition(dataGrid));
+            if (hitTest?.VisualHit == null) return;
+            
+            // Find if we clicked on a DataGridColumnHeader (but not on the filter button)
+            var columnHeader = FindParent<DataGridColumnHeader>(hitTest.VisualHit as DependencyObject);
+            if (columnHeader?.Column == null) return;
+            
+            // Check if we clicked on the filter button - if so, don't select column
+            var filterButton = FindParent<Button>(hitTest.VisualHit as DependencyObject);
+            if (filterButton != null && filterButton.Name == "FilterButton") 
+            {
+                DebugLog($"DataGrid_PreviewMouseLeftButtonDown - Clicked on filter button, ignoring column selection");
+                return;
+            }
+            
+            DebugLog($"DataGrid_PreviewMouseLeftButtonDown - Column header clicked: {columnHeader.Column.Header}");
+            
+            try
+            {
+                // Clear current selection first
+                dataGrid.SelectedCells.Clear();
+                
+                // Select all cells in this column
+                foreach (var item in dataGrid.Items)
+                {
+                    var cellInfo = new DataGridCellInfo(item, columnHeader.Column);
+                    dataGrid.SelectedCells.Add(cellInfo);
+                }
+                
+                DebugLog($"DataGrid_PreviewMouseLeftButtonDown - Selected {dataGrid.SelectedCells.Count} cells in column {columnHeader.Column.Header}");
+                
+                // Prevent further processing to avoid other click behaviors
+                e.Handled = true;
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"DataGrid_PreviewMouseLeftButtonDown - Error: {ex.Message}");
+            }
         }
 
         private void GenerateDataGridColumns()

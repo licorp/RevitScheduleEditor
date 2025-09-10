@@ -265,7 +265,7 @@
                   GridLinesVisibility="All"
                   HeadersVisibility="Column"
                   CanUserResizeColumns="True"
-                  CanUserSortColumns="True"
+                  CanUserSortColumns="False"
                   SelectionMode="Extended"
                   SelectionUnit="Cell"
                   EnableRowVirtualization="True"
