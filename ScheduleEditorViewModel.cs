@@ -1464,43 +1464,169 @@ namespace RevitScheduleEditor
         {
             try
             {
-                var lines = new List<string>();
-                
                 // Get visible fields for headers
                 var visibleFields = SelectedSchedule.Definition.GetFieldOrder()
                     .Select(id => SelectedSchedule.Definition.GetField(id))
                     .Where(f => !f.IsHidden).ToList();
 
-                // Create header line
-                var headers = new List<string> { "Element ID" };
-                headers.AddRange(visibleFields.Select(f => f.GetName()));
-                lines.Add(string.Join(",", headers.Select(h => $"\"{h}\"")));
-
-                // Create data lines
-                foreach (var row in ScheduleData)
-                {
-                    var values = new List<string> { row.GetElement().Id.IntegerValue.ToString() };
-                    
-                    foreach (var field in visibleFields)
-                    {
-                        var fieldName = field.GetName();
-                        var value = row.Values.ContainsKey(fieldName) ? row.Values[fieldName] : "";
-                        values.Add($"\"{value}\"");
-                    }
-                    
-                    lines.Add(string.Join(",", values));
-                }
-
-                // Write to file (CSV format for simplicity)
-                var csvPath = System.IO.Path.ChangeExtension(filePath, ".csv");
-                System.IO.File.WriteAllLines(csvPath, lines);
+                // Create Excel content using XML format (Excel 2003 XML)
+                var excelContent = CreateExcelXmlContent(visibleFields);
                 
-                MessageBox.Show($"Data exported to: {csvPath}\n\nNote: File saved as CSV format for compatibility.", "Export Complete", MessageBoxButton.OK, MessageBoxImage.Information);
+                // Change extension to .xls for XML format compatibility
+                var excelPath = System.IO.Path.ChangeExtension(filePath, ".xls");
+                System.IO.File.WriteAllText(excelPath, excelContent, System.Text.Encoding.UTF8);
+                
+                DebugLog($"Excel file exported to: {excelPath}");
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error writing file: {ex.Message}", "Export Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                DebugLog($"Error writing Excel file: {ex.Message}");
+                throw;
             }
+        }
+
+        private string CreateExcelXmlContent(List<Autodesk.Revit.DB.ScheduleField> visibleFields)
+        {
+            var xml = new System.Text.StringBuilder();
+            
+            // XML Header
+            xml.AppendLine("<?xml version=\"1.0\"?>");
+            xml.AppendLine("<?mso-application progid=\"Excel.Sheet\"?>");
+            xml.AppendLine("<Workbook xmlns=\"urn:schemas-microsoft-com:office:spreadsheet\"");
+            xml.AppendLine(" xmlns:o=\"urn:schemas-microsoft-com:office:office\"");
+            xml.AppendLine(" xmlns:x=\"urn:schemas-microsoft-com:office:excel\"");
+            xml.AppendLine(" xmlns:ss=\"urn:schemas-microsoft-com:office:spreadsheet\"");
+            xml.AppendLine(" xmlns:html=\"http://www.w3.org/TR/REC-html40\">");
+            
+            // Document Properties
+            xml.AppendLine("<DocumentProperties xmlns=\"urn:schemas-microsoft-com:office:office\">");
+            xml.AppendLine($"<Title>{SelectedSchedule?.Name ?? "Schedule"} Export</Title>");
+            xml.AppendLine("<Author>Revit Schedule Editor</Author>");
+            xml.AppendLine($"<Created>{DateTime.Now:yyyy-MM-ddTHH:mm:ssZ}</Created>");
+            xml.AppendLine("</DocumentProperties>");
+            
+            // Styles
+            xml.AppendLine("<Styles>");
+            
+            // Header style
+            xml.AppendLine("<Style ss:ID=\"HeaderStyle\">");
+            xml.AppendLine("<Font ss:Bold=\"1\" ss:Size=\"12\" ss:Color=\"#FFFFFF\"/>");
+            xml.AppendLine("<Interior ss:Color=\"#4472C4\" ss:Pattern=\"Solid\"/>");
+            xml.AppendLine("<Borders>");
+            xml.AppendLine("<Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>");
+            xml.AppendLine("<Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>");
+            xml.AppendLine("<Border ss:Position=\"Right\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>");
+            xml.AppendLine("<Border ss:Position=\"Top\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/>");
+            xml.AppendLine("</Borders>");
+            xml.AppendLine("<Alignment ss:Horizontal=\"Center\" ss:Vertical=\"Center\"/>");
+            xml.AppendLine("</Style>");
+            
+            // Data style - even rows
+            xml.AppendLine("<Style ss:ID=\"DataEven\">");
+            xml.AppendLine("<Font ss:Size=\"10\"/>");
+            xml.AppendLine("<Interior ss:Color=\"#F8F9FA\" ss:Pattern=\"Solid\"/>");
+            xml.AppendLine("<Borders>");
+            xml.AppendLine("<Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\" ss:Color=\"#E0E0E0\"/>");
+            xml.AppendLine("<Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\" ss:Color=\"#E0E0E0\"/>");
+            xml.AppendLine("<Border ss:Position=\"Right\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\" ss:Color=\"#E0E0E0\"/>");
+            xml.AppendLine("<Border ss:Position=\"Top\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\" ss:Color=\"#E0E0E0\"/>");
+            xml.AppendLine("</Borders>");
+            xml.AppendLine("</Style>");
+            
+            // Data style - odd rows
+            xml.AppendLine("<Style ss:ID=\"DataOdd\">");
+            xml.AppendLine("<Font ss:Size=\"10\"/>");
+            xml.AppendLine("<Interior ss:Color=\"#FFFFFF\" ss:Pattern=\"Solid\"/>");
+            xml.AppendLine("<Borders>");
+            xml.AppendLine("<Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\" ss:Color=\"#E0E0E0\"/>");
+            xml.AppendLine("<Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\" ss:Color=\"#E0E0E0\"/>");
+            xml.AppendLine("<Border ss:Position=\"Right\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\" ss:Color=\"#E0E0E0\"/>");
+            xml.AppendLine("<Border ss:Position=\"Top\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\" ss:Color=\"#E0E0E0\"/>");
+            xml.AppendLine("</Borders>");
+            xml.AppendLine("</Style>");
+            
+            // Number style
+            xml.AppendLine("<Style ss:ID=\"NumberStyle\">");
+            xml.AppendLine("<NumberFormat ss:Format=\"#,##0.00\"/>");
+            xml.AppendLine("</Style>");
+            
+            xml.AppendLine("</Styles>");
+            
+            // Worksheet
+            xml.AppendLine($"<Worksheet ss:Name=\"{SelectedSchedule?.Name ?? "Schedule"}\">");
+            xml.AppendLine("<Table>");
+            
+            // Define column widths
+            xml.AppendLine("<Column ss:Width=\"80\"/>"); // Element ID
+            foreach (var field in visibleFields)
+            {
+                var width = EstimateColumnWidth(field.GetName());
+                xml.AppendLine($"<Column ss:Width=\"{width}\"/>");
+            }
+            
+            // Header row
+            xml.AppendLine("<Row ss:Height=\"25\">");
+            xml.AppendLine("<Cell ss:StyleID=\"HeaderStyle\"><Data ss:Type=\"String\">Element ID</Data></Cell>");
+            foreach (var field in visibleFields)
+            {
+                var fieldName = System.Security.SecurityElement.Escape(field.GetName());
+                xml.AppendLine($"<Cell ss:StyleID=\"HeaderStyle\"><Data ss:Type=\"String\">{fieldName}</Data></Cell>");
+            }
+            xml.AppendLine("</Row>");
+            
+            // Data rows
+            var rowIndex = 0;
+            foreach (var row in ScheduleData)
+            {
+                var styleId = (rowIndex % 2 == 0) ? "DataEven" : "DataOdd";
+                xml.AppendLine($"<Row ss:Height=\"20\">");
+                
+                // Element ID
+                xml.AppendLine($"<Cell ss:StyleID=\"{styleId}\"><Data ss:Type=\"Number\">{row.GetElement().Id.IntegerValue}</Data></Cell>");
+                
+                // Field values
+                foreach (var field in visibleFields)
+                {
+                    var fieldName = field.GetName();
+                    var value = row.Values.ContainsKey(fieldName) ? row.Values[fieldName] : "";
+                    var escapedValue = System.Security.SecurityElement.Escape(value);
+                    
+                    // Determine data type
+                    if (IsNumericField(value))
+                    {
+                        xml.AppendLine($"<Cell ss:StyleID=\"{styleId}\"><Data ss:Type=\"Number\">{value}</Data></Cell>");
+                    }
+                    else
+                    {
+                        xml.AppendLine($"<Cell ss:StyleID=\"{styleId}\"><Data ss:Type=\"String\">{escapedValue}</Data></Cell>");
+                    }
+                }
+                
+                xml.AppendLine("</Row>");
+                rowIndex++;
+            }
+            
+            xml.AppendLine("</Table>");
+            
+            // Auto-filter
+            xml.AppendLine("<AutoFilter x:Range=\"R1C1:R1C" + (visibleFields.Count + 1) + "\" xmlns=\"urn:schemas-microsoft-com:office:excel\"/>");
+            
+            xml.AppendLine("</Worksheet>");
+            xml.AppendLine("</Workbook>");
+            
+            return xml.ToString();
+        }
+        
+        private int EstimateColumnWidth(string headerText)
+        {
+            // Estimate column width based on header text length
+            var baseWidth = Math.Max(headerText.Length * 8, 80);
+            return Math.Min(baseWidth, 200); // Cap at 200
+        }
+        
+        private bool IsNumericField(string value)
+        {
+            return double.TryParse(value, out _) || int.TryParse(value, out _);
         }
 
         // Import Command
