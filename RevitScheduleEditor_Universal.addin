@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RevitAddIns>
+  <AddIn Type="Command">
+    <Text>Universal Schedule Editor</Text>
+    <Description>Schedule Editor compatible with Revit 2020-2026</Description>
+    <Assembly>RevitScheduleEditor_Universal.dll</Assembly>
+    <FullClassName>RevitScheduleEditor.ShowScheduleEditorCommand</FullClassName>
+    <ClientId>B8C4C2A8-73B7-4F3E-9F4A-7D8B2C8E1A2F</ClientId>
+    <VendorId>ADSK</VendorId>
+    <VendorDescription>Universal Revit Tools</VendorDescription>
+  </AddIn>
+</RevitAddIns>

@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{YOUR-PROJECT-GUID}</ProjectGuid>
+    <OutputType>Library</OutputType>
+    <AppDesignerFolder>Properties</AppDesignerFolder>
+    <RootNamespace>RevitScheduleEditor</RootNamespace>
+    <AssemblyName>RevitScheduleEditor</AssemblyName>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+    <Deterministic>true</Deterministic>
+    <LangVersion>7.3</LangVersion>
+    
+    <!-- Auto-detect Revit version or use default -->
+    <RevitVersion Condition="'$(RevitVersion)' == ''">2020</RevitVersion>
+    
+    <!-- Define constants based on Revit version -->
+    <DefineConstants>$(DefineConstants);REVIT$(RevitVersion)</DefineConstants>
+  </PropertyGroup>
+  
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+
+  <!-- Try to find Revit installation automatically -->
+  <PropertyGroup>
+    <RevitProgramFiles Condition="'$(RevitProgramFiles)' == '' AND Exists('$(ProgramFiles)\Autodesk\Revit $(RevitVersion)\RevitAPI.dll')">$(ProgramFiles)\Autodesk\Revit $(RevitVersion)</RevitProgramFiles>
+    <RevitProgramFiles Condition="'$(RevitProgramFiles)' == '' AND Exists('$(MSBuildProgramFiles32)\Autodesk\Revit $(RevitVersion)\RevitAPI.dll')">$(MSBuildProgramFiles32)\Autodesk\Revit $(RevitVersion)</RevitProgramFiles>
+    
+    <!-- Fallback paths for different versions -->
+    <RevitProgramFiles Condition="'$(RevitProgramFiles)' == '' AND Exists('$(ProgramFiles)\Autodesk\Revit 2025\RevitAPI.dll')">$(ProgramFiles)\Autodesk\Revit 2025</RevitProgramFiles>
+    <RevitProgramFiles Condition="'$(RevitProgramFiles)' == '' AND Exists('$(ProgramFiles)\Autodesk\Revit 2024\RevitAPI.dll')">$(ProgramFiles)\Autodesk\Revit 2024</RevitProgramFiles>
+    <RevitProgramFiles Condition="'$(RevitProgramFiles)' == '' AND Exists('$(ProgramFiles)\Autodesk\Revit 2023\RevitAPI.dll')">$(ProgramFiles)\Autodesk\Revit 2023</RevitProgramFiles>
+    <RevitProgramFiles Condition="'$(RevitProgramFiles)' == '' AND Exists('$(ProgramFiles)\Autodesk\Revit 2022\RevitAPI.dll')">$(ProgramFiles)\Autodesk\Revit 2022</RevitProgramFiles>
+    <RevitProgramFiles Condition="'$(RevitProgramFiles)' == '' AND Exists('$(ProgramFiles)\Autodesk\Revit 2021\RevitAPI.dll')">$(ProgramFiles)\Autodesk\Revit 2021</RevitProgramFiles>
+    <RevitProgramFiles Condition="'$(RevitProgramFiles)' == '' AND Exists('$(ProgramFiles)\Autodesk\Revit 2020\RevitAPI.dll')">$(ProgramFiles)\Autodesk\Revit 2020</RevitProgramFiles>
+    
+    <!-- Final fallback -->
+    <RevitProgramFiles Condition="'$(RevitProgramFiles)' == ''">C:\Program Files\Autodesk\Revit $(RevitVersion)</RevitProgramFiles>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Flexible Revit API references -->
+    <Reference Include="RevitAPI" Condition="Exists('$(RevitProgramFiles)\RevitAPI.dll')">
+      <HintPath>$(RevitProgramFiles)\RevitAPI.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="RevitAPIUI" Condition="Exists('$(RevitProgramFiles)\RevitAPIUI.dll')">
+      <HintPath>$(RevitProgramFiles)\RevitAPIUI.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    
+    <!-- Standard .NET references -->
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Xaml" />
+    <Reference Include="System.Xml.Linq" />
+    <Reference Include="System.Data.DataSetExtensions" />
+    <Reference Include="Microsoft.CSharp" />
+    <Reference Include="System.Data" />
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.Xml" />
+    <Reference Include="WindowsBase" />
+    
+    <!-- Dependencies -->
+    <Reference Include="DataGridExtensions, Version=2.7.0.0, Culture=neutral, processorArchitecture=MSIL">
+      <HintPath>packages\DataGridExtensions.2.7.0\lib\net48\DataGridExtensions.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+  
+  <ItemGroup>
+    <Compile Include="AsyncScheduleDataManager.cs" />
+    <Compile Include="BaseViewModel.cs" />
+    <Compile Include="DataLoadingEventHandler.cs" />
+    <Compile Include="ProgressiveScheduleCollection.cs" />
+    <Compile Include="RelayCommand.cs" />
+    <Compile Include="ScheduleEditorViewModel.cs" />
+    <Compile Include="ScheduleEditorWindow.xaml.cs">
+      <DependentUpon>ScheduleEditorWindow.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="TextFiltersWindow.xaml.cs">
+      <DependentUpon>TextFiltersWindow.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="FilterTestWindow.xaml.cs">
+      <DependentUpon>FilterTestWindow.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="ScheduleRow.cs" />
+    <Compile Include="ShowScheduleEditorCommand.cs" />
+    <Compile Include="VirtualScheduleCollection.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
+  </ItemGroup>
+  
+  <ItemGroup>
+    <Page Include="ScheduleEditorWindow.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="TextFiltersWindow.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="FilterTestWindow.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+  </ItemGroup>
+  
+  <!-- Add app.config for binding redirects -->
+  <ItemGroup>
+    <None Include="App.config" />
+  </ItemGroup>
+  
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  
+  <!-- Custom target to display Revit path -->
+  <Target Name="DisplayRevitPath" BeforeTargets="Build">
+    <Message Text="Using Revit installation: $(RevitProgramFiles)" Importance="high" />
+    <Message Text="RevitAPI.dll exists: $(RevitProgramFiles)\RevitAPI.dll" Importance="high" Condition="Exists('$(RevitProgramFiles)\RevitAPI.dll')" />
+    <Warning Text="RevitAPI.dll not found at: $(RevitProgramFiles)\RevitAPI.dll" Condition="!Exists('$(RevitProgramFiles)\RevitAPI.dll')" />
+  </Target>
+</Project>

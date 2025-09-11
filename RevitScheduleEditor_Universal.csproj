@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
+  
+  <PropertyGroup>
+    <!-- Multi-target cho các phiên bản Revit khác nhau -->
+    <TargetFrameworks>net48</TargetFrameworks>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>false</UseWindowsForms>
+    <OutputType>Library</OutputType>
+    <AssemblyName>RevitScheduleEditor</AssemblyName>
+    <RootNamespace>RevitScheduleEditor</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    
+    <!-- Build cho multiple Revit versions -->
+    <RevitVersions>2020;2021;2022;2023;2024;2025;2026</RevitVersions>
+  </PropertyGroup>
+
+  <!-- Conditional compilation symbols -->
+  <PropertyGroup Condition="'$(RevitVersion)' == '2020'">
+    <DefineConstants>$(DefineConstants);REVIT2020</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(RevitVersion)' == '2021'">
+    <DefineConstants>$(DefineConstants);REVIT2021</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(RevitVersion)' == '2022'">
+    <DefineConstants>$(DefineConstants);REVIT2022</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(RevitVersion)' == '2023'">
+    <DefineConstants>$(DefineConstants);REVIT2023</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(RevitVersion)' == '2024'">
+    <DefineConstants>$(DefineConstants);REVIT2024</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(RevitVersion)' == '2025'">
+    <DefineConstants>$(DefineConstants);REVIT2025</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(RevitVersion)' == '2026'">
+    <DefineConstants>$(DefineConstants);REVIT2026</DefineConstants>
+  </PropertyGroup>
+
+  <!-- Standard references -->
+  <ItemGroup>
+    <PackageReference Include="DataGridExtensions" Version="2.7.0" />
+  </ItemGroup>
+
+  <!-- Dynamic Revit API references -->
+  <ItemGroup Condition="Exists('$(ProgramFiles)\Autodesk\Revit 2020\RevitAPI.dll')">
+    <Reference Include="RevitAPI_2020">
+      <HintPath>$(ProgramFiles)\Autodesk\Revit 2020\RevitAPI.dll</HintPath>
+      <Private>False</Private>
+      <Aliases>RevitAPI2020</Aliases>
+    </Reference>
+    <Reference Include="RevitAPIUI_2020">
+      <HintPath>$(ProgramFiles)\Autodesk\Revit 2020\RevitAPIUI.dll</HintPath>
+      <Private>False</Private>
+      <Aliases>RevitAPIUI2020</Aliases>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('$(ProgramFiles)\Autodesk\Revit 2021\RevitAPI.dll')">
+    <Reference Include="RevitAPI_2021">
+      <HintPath>$(ProgramFiles)\Autodesk\Revit 2021\RevitAPI.dll</HintPath>
+      <Private>False</Private>
+      <Aliases>RevitAPI2021</Aliases>
+    </Reference>
+    <Reference Include="RevitAPIUI_2021">
+      <HintPath>$(ProgramFiles)\Autodesk\Revit 2021\RevitAPIUI.dll</HintPath>
+      <Private>False</Private>
+      <Aliases>RevitAPIUI2021</Aliases>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('$(ProgramFiles)\Autodesk\Revit 2022\RevitAPI.dll')">
+    <Reference Include="RevitAPI_2022">
+      <HintPath>$(ProgramFiles)\Autodesk\Revit 2022\RevitAPI.dll</HintPath>
+      <Private>False</Private>
+      <Aliases>RevitAPI2022</Aliases>
+    </Reference>
+    <Reference Include="RevitAPIUI_2022">
+      <HintPath>$(ProgramFiles)\Autodesk\Revit 2022\RevitAPIUI.dll</HintPath>
+      <Private>False</Private>
+      <Aliases>RevitAPIUI2022</Aliases>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('$(ProgramFiles)\Autodesk\Revit 2023\RevitAPI.dll')">
+    <Reference Include="RevitAPI_2023">
+      <HintPath>$(ProgramFiles)\Autodesk\Revit 2023\RevitAPI.dll</HintPath>
+      <Private>False</Private>
+      <Aliases>RevitAPI2023</Aliases>
+    </Reference>
+    <Reference Include="RevitAPIUI_2023">
+      <HintPath>$(ProgramFiles)\Autodesk\Revit 2023\RevitAPIUI.dll</HintPath>
+      <Private>False</Private>
+      <Aliases>RevitAPIUI2023</Aliases>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('$(ProgramFiles)\Autodesk\Revit 2024\RevitAPI.dll')">
+    <Reference Include="RevitAPI_2024">
+      <HintPath>$(ProgramFiles)\Autodesk\Revit 2024\RevitAPI.dll</HintPath>
+      <Private>False</Private>
+      <Aliases>RevitAPI2024</Aliases>
+    </Reference>
+    <Reference Include="RevitAPIUI_2024">
+      <HintPath>$(ProgramFiles)\Autodesk\Revit 2024\RevitAPIUI.dll</HintPath>
+      <Private>False</Private>
+      <Aliases>RevitAPIUI2024</Aliases>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('$(ProgramFiles)\Autodesk\Revit 2025\RevitAPI.dll')">
+    <Reference Include="RevitAPI_2025">
+      <HintPath>$(ProgramFiles)\Autodesk\Revit 2025\RevitAPI.dll</HintPath>
+      <Private>False</Private>
+      <Aliases>RevitAPI2025</Aliases>
+    </Reference>
+    <Reference Include="RevitAPIUI_2025">
+      <HintPath>$(ProgramFiles)\Autodesk\Revit 2025\RevitAPIUI.dll</HintPath>
+      <Private>False</Private>
+      <Aliases>RevitAPIUI2025</Aliases>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup Condition="Exists('$(ProgramFiles)\Autodesk\Revit 2026\RevitAPI.dll')">
+    <Reference Include="RevitAPI_2026">
+      <HintPath>$(ProgramFiles)\Autodesk\Revit 2026\RevitAPI.dll</HintPath>
+      <Private>False</Private>
+      <Aliases>RevitAPI2026</Aliases>
+    </Reference>
+    <Reference Include="RevitAPIUI_2026">
+      <HintPath>$(ProgramFiles)\Autodesk\Revit 2026\RevitAPIUI.dll</HintPath>
+      <Private>False</Private>
+      <Aliases>RevitAPIUI2026</Aliases>
+    </Reference>
+  </ItemGroup>
+
+  <!-- Fallback reference cho máy development -->
+  <ItemGroup Condition="!Exists('$(ProgramFiles)\Autodesk\Revit 2020\RevitAPI.dll') AND !Exists('$(ProgramFiles)\Autodesk\Revit 2021\RevitAPI.dll') AND !Exists('$(ProgramFiles)\Autodesk\Revit 2022\RevitAPI.dll') AND !Exists('$(ProgramFiles)\Autodesk\Revit 2023\RevitAPI.dll') AND !Exists('$(ProgramFiles)\Autodesk\Revit 2024\RevitAPI.dll') AND !Exists('$(ProgramFiles)\Autodesk\Revit 2025\RevitAPI.dll') AND !Exists('$(ProgramFiles)\Autodesk\Revit 2026\RevitAPI.dll')">
+    <Reference Include="RevitAPI">
+      <HintPath>C:\Program Files\Autodesk\Revit 2020\RevitAPI.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="RevitAPIUI">
+      <HintPath>C:\Program Files\Autodesk\Revit 2020\RevitAPIUI.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>
