@@ -7,6 +7,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
@@ -175,6 +176,7 @@ namespace RevitScheduleEditor
         public ICommand RedoCommand { get; }
         public ICommand FillDownCommand { get; }
         public ICommand FillRightCommand { get; }
+        public ICommand ClearAllFiltersCommand { get; }
         
         // New commands for the buttons
         public ICommand PreviewEditCommand { get; }
@@ -226,6 +228,7 @@ namespace RevitScheduleEditor
                 RedoCommand = new RelayCommand(ExecuteRedo, CanExecuteRedo);
                 FillDownCommand = new RelayCommand(ExecuteFillDown, CanExecuteFillDown);
                 FillRightCommand = new RelayCommand(ExecuteFillRight, CanExecuteFillRight);
+                ClearAllFiltersCommand = new RelayCommand(ExecuteClearAllFilters, CanExecuteClearAllFilters);
                 
                 // New commands
                 PreviewEditCommand = new RelayCommand(ExecutePreviewEdit, CanExecutePreviewEdit);
@@ -1689,6 +1692,56 @@ namespace RevitScheduleEditor
         private bool CanExecuteExport(object parameter)
         {
             return ScheduleData.Count > 0;
+        }
+
+        #endregion
+        
+        #region Clear All Filters Command
+        
+        // Clear All Filters Command - works with Window to clear filters
+        private void ExecuteClearAllFilters(object parameter)
+        {
+            DebugLog("ExecuteClearAllFilters - Command executed from ViewModel");
+            
+            try
+            {
+                // Find the window and call its clear filters method
+                var window = Application.Current.Windows
+                    .OfType<ScheduleEditorWindow>()
+                    .FirstOrDefault(w => w.DataContext == this);
+                
+                if (window != null)
+                {
+                    // Use reflection to call the private method or make it public
+                    var methodInfo = typeof(ScheduleEditorWindow)
+                        .GetMethod("ClearAllFiltersButton_Click", 
+                                  System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                    
+                    if (methodInfo != null)
+                    {
+                        methodInfo.Invoke(window, new object[] { null, null });
+                        DebugLog("ExecuteClearAllFilters - Successfully called window method via reflection");
+                    }
+                    else
+                    {
+                        DebugLog("ExecuteClearAllFilters - Could not find ClearAllFiltersButton_Click method");
+                    }
+                }
+                else
+                {
+                    DebugLog("ExecuteClearAllFilters - Could not find ScheduleEditorWindow");
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"ExecuteClearAllFilters - Error: {ex.Message}");
+            }
+        }
+        
+        private bool CanExecuteClearAllFilters(object parameter)
+        {
+            // This command is always available if we have data loaded
+            return ScheduleData != null && ScheduleData.Count > 0;
         }
 
         #endregion

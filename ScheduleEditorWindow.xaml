@@ -217,6 +217,7 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="10" Background="#F8F8F8" 
@@ -252,6 +253,25 @@
                     ToolTip="Export current data to Excel file"
                     Style="{DynamicResource ColoredButtonStyle}"/>
         </StackPanel>
+        
+        <!-- Filter Status Panel -->
+        <StackPanel x:Name="FilterStatusPanel" Grid.Row="1" Orientation="Horizontal" Margin="10,5" 
+                    Background="#E3F2FD" Height="35" VerticalAlignment="Top"
+                    Visibility="Collapsed">
+            <TextBlock Text="🔽 Active Filters:" VerticalAlignment="Center" Margin="5,0" 
+                      FontWeight="SemiBold" Foreground="#1976D2"/>
+            <TextBlock x:Name="FilterStatusText" Text="" VerticalAlignment="Center" 
+                      Margin="5,0" Foreground="#424242"/>
+            <Button x:Name="ClearAllFiltersButton" Content="Clear All Filters" 
+                   Margin="10,0,5,0" Padding="8,4" Height="25"
+                   Background="#F44336" Foreground="White" FontSize="11" FontWeight="SemiBold"
+                   BorderBrush="#D32F2F" BorderThickness="1"
+                   Click="ClearAllFiltersButton_Click"
+                   ToolTip="Remove all active filters"
+                   Style="{DynamicResource ColoredButtonStyle}"/>
+            <TextBlock x:Name="FilteredRowCountText" Text="" VerticalAlignment="Center" 
+                      Margin="10,0,5,0" FontStyle="Italic" Foreground="#666666"/>
+        </StackPanel>
 
         <!-- DataGrid với filter buttons integrated trong column headers -->
         <DataGrid x:Name="ScheduleDataGrid"
@@ -279,6 +299,7 @@
             <DataGrid.InputBindings>
                 <KeyBinding Key="V" Modifiers="Ctrl" Command="{Binding PasteCommand}" CommandParameter="{Binding SelectedCells, RelativeSource={RelativeSource AncestorType=DataGrid}}"/>
                 <KeyBinding Key="X" Modifiers="Ctrl" Command="{Binding CutCommand}" CommandParameter="{Binding SelectedCells, RelativeSource={RelativeSource AncestorType=DataGrid}}"/>
+                <KeyBinding Key="Delete" Modifiers="Ctrl+Alt" Command="{Binding ClearAllFiltersCommand}"/>
                 <KeyBinding Key="Z" Modifiers="Ctrl" Command="{Binding UndoCommand}"/>
                 <KeyBinding Key="Y" Modifiers="Ctrl" Command="{Binding RedoCommand}"/>
                 <KeyBinding Key="D" Modifiers="Ctrl" Command="{Binding FillDownCommand}" CommandParameter="{Binding SelectedCells, RelativeSource={RelativeSource AncestorType=DataGrid}}"/>
@@ -297,6 +318,7 @@
                     <MenuItem Header="Fill Down" Command="{Binding FillDownCommand}" CommandParameter="{Binding SelectedCells, RelativeSource={RelativeSource AncestorType=DataGrid}}" InputGestureText="Ctrl+D"/>
                     <MenuItem Header="Fill Right" Command="{Binding FillRightCommand}" CommandParameter="{Binding SelectedCells, RelativeSource={RelativeSource AncestorType=DataGrid}}" InputGestureText="Ctrl+R"/>
                     <MenuItem Header="Autofill" Command="{Binding AutofillCommand}" CommandParameter="{Binding SelectedCells, RelativeSource={RelativeSource AncestorType=DataGrid}}" InputGestureText="Ctrl+F"/>
+                    <MenuItem Header="📊 Fill Series" Click="FillSeries_Click" InputGestureText="Ctrl+Shift+Enter" FontWeight="SemiBold"/>
                     <Separator/>
                     <MenuItem Header="Undo" Command="{Binding UndoCommand}" InputGestureText="Ctrl+Z"/>
                     <MenuItem Header="Redo" Command="{Binding RedoCommand}" InputGestureText="Ctrl+Y"/>
@@ -339,6 +361,19 @@
                     </Button.Effect>
                 </Button>
             </Grid>
+        </Border>
+        
+        <!-- Status bar với hướng dẫn Fill Series -->
+        <Border Grid.Row="3" Background="#F0F0F0" BorderBrush="#D0D0D0" BorderThickness="0,1,0,0" Padding="10,5">
+            <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="11" Foreground="#666666">
+                <Run Text="📋 Autofill:"/>
+                <Run Text="Double-click (multi-select)" FontWeight="SemiBold"/>
+                <Run Text="• Ctrl+Enter (copy) • Shift+Enter (smart) •"/>
+                <Run Text="Ctrl+Shift+Enter (series)" FontWeight="SemiBold" Foreground="#4CAF50"/>
+                <Run Text="🖱️ Fill Handle:"/>
+                <Run Text="Drag (copy) •"/>
+                <Run Text="Ctrl+Drag (series)" FontWeight="SemiBold" Foreground="#4CAF50"/>
+            </TextBlock>
         </Border>
     </Grid>
 </Window>

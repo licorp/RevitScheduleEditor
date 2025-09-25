@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <RevitAddIns>
-  <AddIn Type="Command">
-    <Name>Schedule Editor</Name>
-    <Assembly>c:\Users\quoc.nguyen\Downloads\Compressed\source-code-full-1\Source code full\RevitAPIMEP\RevitScheduleEditor\RevitScheduleEditor\bin\Release\RevitScheduleEditor.dll</Assembly>
-    <AddInId>fe226c92-343e-4eff-a536-016f6cdd20a2</AddInId>
-    <FullClassName>RevitScheduleEditor.ShowScheduleEditorCommand</FullClassName>
-    <VendorId>YourName</VendorId>
-    <VendorDescription>Your Company</VendorDescription>
+  <AddIn Type="Application">
+    <Name>Schedule Editor Professional</Name>
+    <Assembly>RevitScheduleEditor.dll</Assembly>
+    <FullClassName>RevitScheduleEditor.ScheduleEditorApplication</FullClassName>
+    <ClientId>fe226c92-343e-4eff-a536-016f6cdd20a2</ClientId>
+    <VendorId>ScheduleTools</VendorId>
+    <VendorDescription>Professional Schedule Management Tools</VendorDescription>
   </AddIn>
 </RevitAddIns>

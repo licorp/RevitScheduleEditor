@@ -487,6 +487,9 @@ namespace RevitScheduleEditor
             
             // Setup fill handle interactions
             SetupFillHandleInteractions(dataGrid);
+            
+            // Update filter status display when columns change
+            UpdateFilterStatusDisplay();
         }
 
         // Event handler for integrated filter buttons in column headers
@@ -541,13 +544,30 @@ namespace RevitScheduleEditor
                 return;
             }
 
-            // Get unique values for this column
+            // Get the DataGrid to access currently visible data (after existing filters)
+            var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
+            var currentData = dataGrid?.ItemsSource as IEnumerable<ScheduleRow>;
+            
+            // If no current data source (no filters applied yet), use all data
+            if (currentData == null)
+            {
+                currentData = _viewModel.ScheduleData;
+                DebugLog($"ShowFilterPopup - Using original data source ({_viewModel.ScheduleData.Count} rows)");
+            }
+            else
+            {
+                var currentDataList = currentData.ToList();
+                DebugLog($"ShowFilterPopup - Using filtered data source ({currentDataList.Count} rows)");
+                currentData = currentDataList;
+            }
+
+            // Get unique values for this column FROM CURRENTLY VISIBLE DATA ONLY
             var uniqueValues = new List<string>();
             
             if (columnName == "Element ID")
             {
                 // Special handling for Element ID column
-                uniqueValues = _viewModel.ScheduleData
+                uniqueValues = currentData
                     .Select(row => row.GetElement().Id.IntegerValue.ToString())
                     .Distinct()
                     .OrderBy(v => long.Parse(v))
@@ -556,7 +576,8 @@ namespace RevitScheduleEditor
             else
             {
                 // Regular column values - include empty values for "(Blanks)" functionality
-                uniqueValues = _viewModel.ScheduleData
+                // IMPORTANT: Only get values from currently visible/filtered data
+                uniqueValues = currentData
                     .Select(row => row.Values.ContainsKey(columnName) ? row.Values[columnName] : "")
                     .Select(v => (v ?? "").Trim()) // Normalize by trimming whitespace
                     .Distinct(StringComparer.OrdinalIgnoreCase) // Case-insensitive distinct
@@ -564,7 +585,7 @@ namespace RevitScheduleEditor
                     .ToList();
             }
 
-            DebugLog($"ShowFilterPopup - Found {uniqueValues.Count} unique values");
+            DebugLog($"ShowFilterPopup - Found {uniqueValues.Count} unique values from currently visible data");
 
             if (uniqueValues.Count == 0) 
             {
@@ -573,9 +594,20 @@ namespace RevitScheduleEditor
             }
 
             // Get current filter values for this column
-            var currentFilters = _columnFilters.ContainsKey(columnName) 
-                ? _columnFilters[columnName].ToList() 
-                : uniqueValues;
+            // If column has existing filter, use those selected values
+            // If no existing filter, default to showing all available values as selected
+            HashSet<string> currentFilters;
+            if (_columnFilters.ContainsKey(columnName))
+            {
+                currentFilters = _columnFilters[columnName];
+                DebugLog($"ShowFilterPopup - Column {columnName} has existing filter with {currentFilters.Count} selected values");
+            }
+            else
+            {
+                // No existing filter for this column - default to all values selected
+                currentFilters = new HashSet<string>(uniqueValues, StringComparer.OrdinalIgnoreCase);
+                DebugLog($"ShowFilterPopup - Column {columnName} has no existing filter, defaulting to all {uniqueValues.Count} values selected");
+            }
 
             DebugLog($"ShowFilterPopup - Current filters count: {currentFilters.Count}");
 
@@ -589,7 +621,8 @@ namespace RevitScheduleEditor
                 };
                 
                 // Set filter data using the new method
-                filterWindow.SetFilterData(uniqueValues, _columnFilters.ContainsKey(columnName) ? _columnFilters[columnName] : null);
+                // Pass the current filters (selected values) to the window
+                filterWindow.SetFilterData(uniqueValues, currentFilters);
 
                 DebugLog("ShowFilterPopup - Showing TextFiltersWindow dialog");
                 if (filterWindow.ShowDialog() == true)
@@ -627,9 +660,9 @@ namespace RevitScheduleEditor
                     UpdateColumnHeaderAppearance(columnName, _columnFilters.ContainsKey(columnName));
                     
                     // Apply all filters to refresh the view
-                    DebugLog("ShowFilterPopup - Calling ApplyFilters()");
-                    ApplyFilters();
-                    DebugLog("ShowFilterPopup - ApplyFilters() completed");
+                    DebugLog("ShowFilterPopup - Calling ApplyFiltersEnhanced()");
+                    ApplyFiltersEnhanced();
+                    DebugLog("ShowFilterPopup - ApplyFiltersEnhanced() completed");
                 }
                 else
                 {
@@ -697,26 +730,8 @@ namespace RevitScheduleEditor
                 // Update column header appearance
                 UpdateColumnHeaderAppearance(columnName, hasFilter);
 
-                // Apply all filters with proper synchronization
-                var collectionView = CollectionViewSource.GetDefaultView(_viewModel.ScheduleData);
-                
-                // Use Dispatcher to ensure UI is not in edit mode
-                this.Dispatcher.BeginInvoke(new Action(() =>
-                {
-                    try
-                    {
-                        collectionView.Filter = FilterPredicate;
-                        collectionView.Refresh();
-                        System.Diagnostics.Debug.WriteLine($"After filter: {collectionView.Cast<object>().Count()} items visible");
-                    }
-                    catch (Exception filterEx)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"Filter application error: {filterEx.Message}");
-                        // If filter fails, clear all filters and show all data
-                        collectionView.Filter = null;
-                        collectionView.Refresh();
-                    }
-                }), System.Windows.Threading.DispatcherPriority.Background);
+                // Apply all filters with enhanced method
+                ApplyFiltersEnhanced();
                 
             }
             catch (Exception ex)
@@ -907,8 +922,21 @@ namespace RevitScheduleEditor
                     var endCell = GetCellFromPoint(dataGrid, currentPosition);
                     if (endCell != null)
                     {
-                        // Highlight selection range
-                        HighlightFillRange(dataGrid, startCell, endCell);
+                        // Check if Ctrl is pressed for different visual feedback
+                        bool isCtrlPressed = Keyboard.Modifiers.HasFlag(ModifierKeys.Control);
+                        
+                        // Highlight selection range with different colors based on mode
+                        HighlightFillRange(dataGrid, startCell, endCell, isCtrlPressed);
+                        
+                        // Update cursor based on mode
+                        if (isCtrlPressed)
+                        {
+                            dataGrid.Cursor = Cursors.Cross; // Series fill cursor
+                        }
+                        else
+                        {
+                            dataGrid.Cursor = Cursors.SizeNWSE; // Normal fill cursor
+                        }
                     }
                 }
             };
@@ -929,6 +957,7 @@ namespace RevitScheduleEditor
                     isDragging = false;
                     startCell = null;
                     dataGrid.ReleaseMouseCapture();
+                    dataGrid.Cursor = Cursors.Arrow; // Reset cursor
                     ClearFillHighlight(dataGrid);
                 }
             };
@@ -955,7 +984,7 @@ namespace RevitScheduleEditor
             return null;
         }
 
-        private void HighlightFillRange(DataGrid dataGrid, DataGridCell startCell, DataGridCell endCell)
+        private void HighlightFillRange(DataGrid dataGrid, DataGridCell startCell, DataGridCell endCell, bool isCtrlPressed = false)
         {
             // Clear previous highlight
             ClearFillHighlight(dataGrid);
@@ -972,6 +1001,11 @@ namespace RevitScheduleEditor
             var minCol = Math.Min(startCol, endCol);
             var maxCol = Math.Max(startCol, endCol);
             
+            // Choose color based on fill mode
+            Color highlightColor = isCtrlPressed 
+                ? Color.FromArgb(120, 76, 175, 80)   // Green for Fill Series (Ctrl)
+                : Color.FromArgb(100, 0, 120, 212);  // Blue for normal fill
+            
             // Highlight range
             for (int row = minRow; row <= maxRow; row++)
             {
@@ -980,7 +1014,7 @@ namespace RevitScheduleEditor
                     var cell = GetCell(dataGrid, row, col);
                     if (cell != null)
                     {
-                        cell.Background = new SolidColorBrush(Color.FromArgb(100, 0, 120, 212));
+                        cell.Background = new SolidColorBrush(highlightColor);
                     }
                 }
             }
@@ -1046,19 +1080,33 @@ namespace RevitScheduleEditor
             var columnName = startCell.Column.Header.ToString();
             var startValue = startRowData?.Values[columnName] ?? "";
             
+            // Check if Ctrl is pressed for Fill Series mode
+            bool isCtrlPressed = Keyboard.Modifiers.HasFlag(ModifierKeys.Control);
+            
+            DebugLog($"PerformFillHandleAutofill - Ctrl pressed: {isCtrlPressed}, Start value: '{startValue}'");
+            
             // Determine fill direction and perform autofill
             if (startRow == endRow) // Horizontal fill
             {
                 var minCol = Math.Min(startCol, endCol);
                 var maxCol = Math.Max(startCol, endCol);
                 
-                for (int col = minCol + 1; col <= maxCol; col++)
+                if (isCtrlPressed)
                 {
-                    var targetColumnName = dataGrid.Columns[col].Header.ToString();
-                    var targetRowData = dataGrid.Items[startRow] as ScheduleRow;
-                    if (targetRowData != null)
+                    // Fill Series horizontally với Ctrl
+                    PerformHorizontalFillSeries(dataGrid, startRow, minCol, maxCol, startValue);
+                }
+                else
+                {
+                    // Copy value horizontally (original behavior)
+                    for (int col = minCol + 1; col <= maxCol; col++)
                     {
-                        targetRowData[targetColumnName] = startValue;  // Use indexer instead of Values
+                        var targetColumnName = dataGrid.Columns[col].Header.ToString();
+                        var targetRowData = dataGrid.Items[startRow] as ScheduleRow;
+                        if (targetRowData != null)
+                        {
+                            targetRowData[targetColumnName] = startValue;  // Use indexer instead of Values
+                        }
                     }
                 }
             }
@@ -1067,31 +1115,197 @@ namespace RevitScheduleEditor
                 var minRow = Math.Min(startRow, endRow);
                 var maxRow = Math.Max(startRow, endRow);
                 
-                // Detect pattern for smart fill
-                var values = new List<string>();
-                for (int row = minRow; row <= Math.Min(minRow + 2, maxRow); row++)
+                if (isCtrlPressed)
                 {
-                    var rowData = dataGrid.Items[row] as ScheduleRow;
-                    if (rowData?.Values.ContainsKey(columnName) == true)
-                    {
-                        values.Add(rowData.Values[columnName]);
-                    }
+                    // Fill Series vertically với Ctrl
+                    PerformVerticalFillSeries(dataGrid, minRow, maxRow, columnName, startValue);
                 }
-                
-                // Perform smart fill with pattern detection
-                for (int row = minRow + 1; row <= maxRow; row++)
+                else
                 {
-                    var targetRowData = dataGrid.Items[row] as ScheduleRow;
-                    if (targetRowData != null)
+                    // Smart fill with pattern detection (original behavior)
+                    var values = new List<string>();
+                    for (int row = minRow; row <= Math.Min(minRow + 2, maxRow); row++)
                     {
-                        var fillValue = GetSmartFillValue(values, row - minRow);
-                        targetRowData[columnName] = fillValue;  // Use indexer instead of Values
+                        var rowData = dataGrid.Items[row] as ScheduleRow;
+                        if (rowData?.Values.ContainsKey(columnName) == true)
+                        {
+                            values.Add(rowData.Values[columnName]);
+                        }
+                    }
+                    
+                    // Perform smart fill with pattern detection
+                    for (int row = minRow + 1; row <= maxRow; row++)
+                    {
+                        var targetRowData = dataGrid.Items[row] as ScheduleRow;
+                        if (targetRowData != null)
+                        {
+                            var fillValue = GetSmartFillValue(values, row - minRow);
+                            targetRowData[columnName] = fillValue;  // Use indexer instead of Values
+                        }
                     }
                 }
             }
             
             // Refresh the view
             dataGrid.Items.Refresh();
+            
+            DebugLog($"PerformFillHandleAutofill completed - Mode: {(isCtrlPressed ? "Fill Series" : "Smart Fill")}");
+        }
+
+        /// <summary>
+        /// Thực hiện Fill Series theo chiều ngang (horizontal) khi giữ Ctrl
+        /// </summary>
+        private void PerformHorizontalFillSeries(DataGrid dataGrid, int row, int minCol, int maxCol, string startValue)
+        {
+            DebugLog($"PerformHorizontalFillSeries - Row: {row}, Columns: {minCol} to {maxCol}, Start value: '{startValue}'");
+            
+            // Parse start value to determine if it's numeric or text with number
+            if (double.TryParse(startValue, out double numericStart))
+            {
+                // Pure number - increment by 1
+                DebugLog($"Horizontal Fill Series - Pure number detected: {numericStart}");
+                for (int col = minCol + 1; col <= maxCol; col++)
+                {
+                    var targetColumnName = dataGrid.Columns[col].Header.ToString();
+                    var targetRowData = dataGrid.Items[row] as ScheduleRow;
+                    if (targetRowData != null)
+                    {
+                        double newValue = numericStart + (col - minCol);
+                        targetRowData[targetColumnName] = newValue.ToString();
+                        DebugLog($"Set cell [{row}, {col}] = {newValue}");
+                    }
+                }
+            }
+            else if (ExtractNumber(startValue, out string textPart, out int numberPart))
+            {
+                // Text with number - increment the number part
+                DebugLog($"Horizontal Fill Series - Text with number detected: '{textPart}' + {numberPart}");
+                
+                // Check if number is at the end (most common case)
+                var match = System.Text.RegularExpressions.Regex.Match(startValue, @"^(.+?)(\d+)$");
+                bool numberAtEnd = match.Success;
+                
+                for (int col = minCol + 1; col <= maxCol; col++)
+                {
+                    var targetColumnName = dataGrid.Columns[col].Header.ToString();
+                    var targetRowData = dataGrid.Items[row] as ScheduleRow;
+                    if (targetRowData != null)
+                    {
+                        int newNumber = numberPart + (col - minCol);
+                        string newValue = numberAtEnd ? textPart + newNumber : newNumber + textPart;
+                        targetRowData[targetColumnName] = newValue;
+                        DebugLog($"Set cell [{row}, {col}] = '{newValue}'");
+                    }
+                }
+            }
+            else
+            {
+                // Not numeric - create a simple series by appending numbers
+                DebugLog($"Horizontal Fill Series - Non-numeric text, creating numbered series");
+                for (int col = minCol + 1; col <= maxCol; col++)
+                {
+                    var targetColumnName = dataGrid.Columns[col].Header.ToString();
+                    var targetRowData = dataGrid.Items[row] as ScheduleRow;
+                    if (targetRowData != null)
+                    {
+                        string newValue = $"{startValue} {col - minCol + 1}";
+                        targetRowData[targetColumnName] = newValue;
+                        DebugLog($"Set cell [{row}, {col}] = '{newValue}'");
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Thực hiện Fill Series theo chiều dọc (vertical) khi giữ Ctrl
+        /// </summary>
+        private void PerformVerticalFillSeries(DataGrid dataGrid, int minRow, int maxRow, string columnName, string startValue)
+        {
+            DebugLog($"PerformVerticalFillSeries - Rows: {minRow} to {maxRow}, Column: '{columnName}', Start value: '{startValue}'");
+            
+            // Parse start value to determine if it's numeric or text with number
+            if (double.TryParse(startValue, out double numericStart))
+            {
+                // Pure number - increment by 1
+                DebugLog($"Vertical Fill Series - Pure number detected: {numericStart}");
+                for (int row = minRow + 1; row <= maxRow; row++)
+                {
+                    var targetRowData = dataGrid.Items[row] as ScheduleRow;
+                    if (targetRowData != null)
+                    {
+                        double newValue = numericStart + (row - minRow);
+                        targetRowData[columnName] = newValue.ToString();
+                        DebugLog($"Set cell [{row}] = {newValue}");
+                    }
+                }
+            }
+            else if (ExtractNumber(startValue, out string textPart, out int numberPart))
+            {
+                // Text with number - increment the number part
+                DebugLog($"Vertical Fill Series - Text with number detected: '{textPart}' + {numberPart}");
+                
+                // Check if number is at the end (most common case)
+                var match = System.Text.RegularExpressions.Regex.Match(startValue, @"^(.+?)(\d+)$");
+                bool numberAtEnd = match.Success;
+                
+                for (int row = minRow + 1; row <= maxRow; row++)
+                {
+                    var targetRowData = dataGrid.Items[row] as ScheduleRow;
+                    if (targetRowData != null)
+                    {
+                        int newNumber = numberPart + (row - minRow);
+                        string newValue = numberAtEnd ? textPart + newNumber : newNumber + textPart;
+                        targetRowData[columnName] = newValue;
+                        DebugLog($"Set cell [{row}] = '{newValue}'");
+                    }
+                }
+            }
+            else
+            {
+                // Not numeric - create a simple series by appending numbers
+                DebugLog($"Vertical Fill Series - Non-numeric text, creating numbered series");
+                for (int row = minRow + 1; row <= maxRow; row++)
+                {
+                    var targetRowData = dataGrid.Items[row] as ScheduleRow;
+                    if (targetRowData != null)
+                    {
+                        string newValue = $"{startValue} {row - minRow + 1}";
+                        targetRowData[columnName] = newValue;
+                        DebugLog($"Set cell [{row}] = '{newValue}'");
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Phân tích text để trích xuất phần text và phần số
+        /// Ví dụ: "Item 5" -> textPart = "Item ", numberPart = 5
+        /// </summary>
+        private bool ExtractNumber(string input, out string textPart, out int numberPart)
+        {
+            textPart = "";
+            numberPart = 0;
+
+            if (string.IsNullOrEmpty(input))
+                return false;
+
+            // Tìm số ở cuối string (pattern phổ biến nhất: "Item 5", "Room 101", etc.)
+            var match = System.Text.RegularExpressions.Regex.Match(input, @"^(.+?)(\d+)$");
+            if (match.Success && int.TryParse(match.Groups[2].Value, out numberPart))
+            {
+                textPart = match.Groups[1].Value;
+                return true;
+            }
+
+            // Tìm số ở đầu string ("5 Items", "101 Room", etc.)
+            match = System.Text.RegularExpressions.Regex.Match(input, @"^(\d+)(.*)$");
+            if (match.Success && int.TryParse(match.Groups[1].Value, out numberPart))
+            {
+                textPart = match.Groups[2].Value;
+                return true;
+            }
+
+            return false;
         }
 
         private string GetSmartFillValue(List<string> seedValues, int position)
@@ -1185,7 +1399,92 @@ namespace RevitScheduleEditor
                     ExecuteSmartAutofill((System.Collections.IList)dataGrid.SelectedCells);
                     e.Handled = true;
                 }
+                else if (e.Key == Key.Enter && Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift))
+                {
+                    // Fill Series với Ctrl+Shift+Enter
+                    if (dataGrid.SelectedCells.Count > 1)
+                    {
+                        ExecuteFillSeries((System.Collections.IList)dataGrid.SelectedCells);
+                        e.Handled = true;
+                    }
+                }
             };
+        }
+
+        /// <summary>
+        /// Thực hiện Fill Series cho các cell đã chọn (keyboard shortcut)
+        /// </summary>
+        private void ExecuteFillSeries(System.Collections.IList selectedCells)
+        {
+            if (selectedCells == null || selectedCells.Count < 2) 
+            {
+                DebugLog("ExecuteFillSeries - Not enough cells selected");
+                return;
+            }
+
+            DebugLog($"ExecuteFillSeries - Processing {selectedCells.Count} selected cells");
+            
+            var cellInfos = selectedCells.Cast<DataGridCellInfo>().ToList();
+            
+            // Save state for undo
+            _viewModel.SaveStateForUndo();
+            
+            // Group by column for vertical fill series
+            var columnGroups = cellInfos.GroupBy(c => c.Column).ToList();
+            
+            foreach (var columnGroup in columnGroups)
+            {
+                var cellsInColumn = columnGroup.OrderBy(c => _viewModel.ScheduleData.IndexOf(c.Item as ScheduleRow)).ToList();
+                if (cellsInColumn.Count < 2) continue;
+
+                var column = cellsInColumn.First().Column as DataGridBoundColumn;
+                if (column == null) continue;
+
+                var bindingPath = (column.Binding as System.Windows.Data.Binding)?.Path.Path;
+                if (string.IsNullOrEmpty(bindingPath)) continue;
+
+                string columnName = bindingPath.Trim('[', ']');
+
+                // Get first cell value as starting point
+                var firstRow = cellsInColumn[0].Item as ScheduleRow;
+                if (firstRow == null) continue;
+
+                string startValue = firstRow[columnName];
+                DebugLog($"ExecuteFillSeries - Column '{columnName}', Start value: '{startValue}'");
+
+                // Apply Fill Series to all cells in this column
+                var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
+                var startRowIndex = _viewModel.ScheduleData.IndexOf(firstRow);
+                var endRowIndex = _viewModel.ScheduleData.IndexOf(cellsInColumn.Last().Item as ScheduleRow);
+                
+                // Use the PerformVerticalFillSeries method
+                PerformVerticalFillSeries(dataGrid, startRowIndex, endRowIndex, columnName, startValue);
+            }
+            
+            // Refresh the view
+            var dataGridControl = this.FindName("ScheduleDataGrid") as DataGrid;
+            dataGridControl?.Items.Refresh();
+            
+            DebugLog("ExecuteFillSeries completed");
+        }
+
+        /// <summary>
+        /// Context menu click handler cho Fill Series
+        /// </summary>
+        private void FillSeries_Click(object sender, RoutedEventArgs e)
+        {
+            var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
+            if (dataGrid?.SelectedCells != null && dataGrid.SelectedCells.Count > 1)
+            {
+                DebugLog($"FillSeries_Click - Executing Fill Series for {dataGrid.SelectedCells.Count} cells");
+                ExecuteFillSeries((System.Collections.IList)dataGrid.SelectedCells);
+            }
+            else
+            {
+                DebugLog("FillSeries_Click - Not enough cells selected for Fill Series");
+                MessageBox.Show("Vui lòng chọn ít nhất 2 cell để sử dụng Fill Series.", "Fill Series", 
+                               MessageBoxButton.OK, MessageBoxImage.Information);
+            }
         }
 
         private void ExecuteSmartAutofill(System.Collections.IList selectedCells)
@@ -1286,24 +1585,6 @@ namespace RevitScheduleEditor
             }
 
             return value1;
-        }
-
-        private bool ExtractNumber(string input, out string textPart, out int numberPart)
-        {
-            textPart = "";
-            numberPart = 0;
-
-            if (string.IsNullOrEmpty(input)) return false;
-
-            // Find last number in string
-            var match = System.Text.RegularExpressions.Regex.Match(input, @"^(.*?)(\d+)$");
-            if (match.Success)
-            {
-                textPart = match.Groups[1].Value;
-                return int.TryParse(match.Groups[2].Value, out numberPart);
-            }
-
-            return false;
         }
 
         private enum PatternType
@@ -1660,6 +1941,211 @@ namespace RevitScheduleEditor
             catch (Exception ex)
             {
                 DebugLog($"PasteCells - Error: {ex.Message}");
+            }
+        }
+        
+        #endregion
+        
+        #region Multi-Column AutoFilter Enhancement
+        
+        // Clear All Filters Button Event Handler
+        private void ClearAllFiltersButton_Click(object sender, RoutedEventArgs e)
+        {
+            DebugLog("ClearAllFiltersButton_Click - Started");
+            
+            try
+            {
+                // Clear all column filters
+                _columnFilters.Clear();
+                DebugLog("ClearAllFiltersButton_Click - Cleared all column filters");
+                
+                // Update all column headers to normal appearance
+                UpdateAllColumnHeadersAppearance();
+                DebugLog("ClearAllFiltersButton_Click - Updated column header appearances");
+                
+                // Apply filters (which will show all data since no filters exist)
+                ApplyFilters();
+                DebugLog("ClearAllFiltersButton_Click - Applied filters (show all data)");
+                
+                // Update filter status display
+                UpdateFilterStatusDisplay();
+                DebugLog("ClearAllFiltersButton_Click - Updated filter status display");
+                
+                // Show success message
+                MessageBox.Show("Tất cả bộ lọc đã được xóa. Hiển thị toàn bộ dữ liệu.", 
+                              "Xóa Bộ Lọc", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"ClearAllFiltersButton_Click - Error: {ex.Message}");
+                MessageBox.Show($"Lỗi khi xóa bộ lọc: {ex.Message}", 
+                              "Lỗi", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+        
+        // Update Filter Status Display
+        private void UpdateFilterStatusDisplay()
+        {
+            try
+            {
+                var filterStatusPanel = this.FindName("FilterStatusPanel") as StackPanel;
+                var filterStatusText = this.FindName("FilterStatusText") as TextBlock;
+                var filteredRowCountText = this.FindName("FilteredRowCountText") as TextBlock;
+                var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
+                
+                if (filterStatusPanel == null || filterStatusText == null || filteredRowCountText == null)
+                {
+                    DebugLog("UpdateFilterStatusDisplay - UI elements not found");
+                    return;
+                }
+                
+                if (_columnFilters.Count == 0)
+                {
+                    // No filters active
+                    filterStatusPanel.Visibility = System.Windows.Visibility.Collapsed;
+                    DebugLog("UpdateFilterStatusDisplay - No filters, hiding status panel");
+                }
+                else
+                {
+                    // Show filter status
+                    filterStatusPanel.Visibility = System.Windows.Visibility.Visible;
+                    
+                    // Create filter summary text
+                    var filterSummary = new List<string>();
+                    foreach (var filter in _columnFilters)
+                    {
+                        var columnName = filter.Key;
+                        var valueCount = filter.Value.Count;
+                        filterSummary.Add($"{columnName} ({valueCount} items)");
+                    }
+                    
+                    filterStatusText.Text = string.Join(", ", filterSummary.Take(3)) + 
+                                          (filterSummary.Count > 3 ? $" +{filterSummary.Count - 3} more" : "");
+                    
+                    // Show filtered row count
+                    if (dataGrid?.ItemsSource != null)
+                    {
+                        var filteredCount = (dataGrid.ItemsSource as System.Collections.IEnumerable)?.Cast<object>().Count() ?? 0;
+                        var totalCount = _viewModel?.ScheduleData?.Count ?? 0;
+                        filteredRowCountText.Text = $"Showing {filteredCount:N0} of {totalCount:N0} rows";
+                    }
+                    
+                    DebugLog($"UpdateFilterStatusDisplay - Showing {_columnFilters.Count} active filters");
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"UpdateFilterStatusDisplay - Error: {ex.Message}");
+            }
+        }
+        
+        // Get Filter Summary for Column
+        private string GetFilterSummaryForColumn(string columnName)
+        {
+            if (!_columnFilters.ContainsKey(columnName))
+                return "All";
+                
+            var filter = _columnFilters[columnName];
+            if (filter.Count == 0)
+                return "None";
+                
+            if (filter.Count == 1)
+                return filter.First();
+                
+            return $"{filter.Count} selected";
+        }
+        
+        // Enhanced Apply Filters with better performance and logging
+        private void ApplyFiltersEnhanced()
+        {
+            DebugLog($"ApplyFiltersEnhanced - Started, active filters: {_columnFilters.Count}");
+            
+            if (_viewModel?.ScheduleData == null) 
+            {
+                DebugLog("ApplyFiltersEnhanced - ScheduleData is null");
+                return;
+            }
+
+            try
+            {
+                var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
+                if (dataGrid == null) 
+                {
+                    DebugLog("ApplyFiltersEnhanced - DataGrid not found");
+                    return;
+                }
+
+                var totalRows = _viewModel.ScheduleData.Count;
+                DebugLog($"ApplyFiltersEnhanced - Total rows: {totalRows}");
+
+                // If no filters, show all data
+                if (_columnFilters.Count == 0)
+                {
+                    dataGrid.ItemsSource = _viewModel.ScheduleData;
+                    DebugLog("ApplyFiltersEnhanced - No filters, showing all data");
+                    UpdateFilterStatusDisplay();
+                    return;
+                }
+
+                // Apply multi-column AND logic filtering
+                var filteredData = _viewModel.ScheduleData.Where(row =>
+                {
+                    // Check all active filters - ALL must pass (AND logic)
+                    foreach (var filter in _columnFilters)
+                    {
+                        string columnName = filter.Key;
+                        var allowedValues = filter.Value;
+                        
+                        // If filter has no allowed values, hide this row
+                        if (allowedValues.Count == 0)
+                            return false;
+                        
+                        // Get cell value
+                        string cellValue = "";
+                        if (columnName == "Element ID")
+                        {
+                            cellValue = row.GetElement().Id.IntegerValue.ToString();
+                        }
+                        else if (row.Values.ContainsKey(columnName))
+                        {
+                            cellValue = row.Values[columnName];
+                        }
+                        
+                        // Normalize and check if value is allowed
+                        string normalizedCellValue = (cellValue ?? "").Trim();
+                        bool isAllowed = allowedValues.Any(allowed => 
+                            string.Equals((allowed ?? "").Trim(), normalizedCellValue, StringComparison.OrdinalIgnoreCase));
+                        
+                        // If this column filter fails, reject the row
+                        if (!isAllowed)
+                            return false;
+                    }
+                    
+                    // All filters passed - include this row
+                    return true;
+                }).ToList();
+
+                var filteredCount = filteredData.Count;
+                DebugLog($"ApplyFiltersEnhanced - Filtered to {filteredCount} rows from {totalRows}");
+
+                // Update DataGrid
+                dataGrid.ItemsSource = filteredData;
+                
+                // Update filter status display
+                UpdateFilterStatusDisplay();
+                
+                DebugLog("ApplyFiltersEnhanced - Completed successfully");
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"ApplyFiltersEnhanced - Error: {ex.Message}");
+                
+                // On error, show all data
+                var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
+                if (dataGrid != null)
+                {
+                    dataGrid.ItemsSource = _viewModel.ScheduleData;
+                }
             }
         }
         

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RevitAddIns>
+  <AddIn Type="Application">
+    <Name>Licorp Schedule Editor Professional</Name>
+    <Assembly>LicorpScheduleEditor.dll</Assembly>
+    <FullClassName>RevitScheduleEditor.ScheduleEditorApplication</FullClassName>
+    <ClientId>fe226c92-343e-4eff-a536-016f6cdd20a2</ClientId>
+    <VendorId>Licorp</VendorId>
+    <VendorDescription>Licorp Professional Schedule Management Tools</VendorDescription>
+  </AddIn>
+</RevitAddIns>
