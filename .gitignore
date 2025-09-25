@@ -1,5 +1,13 @@
 # Ignore Visual Studio and build folders
 .vs/
 .vscode/
-bin/
-obj/
+bin/Debug/*
+bin/Release/*
+!bin/Debug/*.dll
+!bin/Release/*.dll
+!bin/Debug/*.pdb
+!bin/Release/*.pdb
+obj/Debug/*
+obj/Release/*
+!obj/Debug/*.dll
+!obj/Release/*.dll
