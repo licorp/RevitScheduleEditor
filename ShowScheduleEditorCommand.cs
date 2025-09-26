@@ -33,14 +33,18 @@ namespace RevitScheduleEditor
                 var window = new ScheduleEditorWindow(doc);
                 DebugLog("ScheduleEditorWindow created successfully");
                 
-                // Đảm bảo cửa sổ được hiển thị như một hộp thoại của Revit
-                System.Windows.Interop.WindowInteropHelper helper = new System.Windows.Interop.WindowInteropHelper(window);
-                helper.Owner = commandData.Application.MainWindowHandle;
-                DebugLog("Window owner set to Revit main window");
+                // Không set Owner để tránh block Revit - cho phép non-modal operation
+                // System.Windows.Interop.WindowInteropHelper helper = new System.Windows.Interop.WindowInteropHelper(window);
+                // helper.Owner = commandData.Application.MainWindowHandle;
                 
-                DebugLog("Showing Schedule Editor dialog");
-                window.ShowDialog();
-                DebugLog("Schedule Editor dialog closed");
+                // Set window properties để hoạt động độc lập
+                window.Topmost = true; // Giữ window trên cùng
+                window.ShowInTaskbar = true; // Hiển thị trong taskbar
+                window.WindowStartupLocation = System.Windows.WindowStartupLocation.CenterScreen;
+                
+                DebugLog("Showing Schedule Editor as non-modal window");
+                window.Show(); // Sử dụng Show() thay vì ShowDialog() để không block Revit
+                DebugLog("Schedule Editor window displayed - Revit is not blocked");
                 
                 return Result.Succeeded;
             }

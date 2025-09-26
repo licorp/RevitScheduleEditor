@@ -11,6 +11,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
 using System.Windows.Shapes;
+using System.Windows.Threading;
 using Grid = System.Windows.Controls.Grid;
 using Rectangle = System.Windows.Shapes.Rectangle;
 using Point = System.Windows.Point;
@@ -58,6 +59,15 @@ namespace RevitScheduleEditor
                 this.DataContext = _viewModel;
                 DebugLog("DataContext set to ViewModel");
                 
+                // Add ComboBox event handler for debugging
+                ScheduleComboBox.SelectionChanged += (sender, e) =>
+                {
+                    var comboBox = sender as ComboBox;
+                    DebugLog($"ComboBox SelectionChanged - SelectedItem: {comboBox?.SelectedItem?.GetType().Name ?? "null"} - {(comboBox?.SelectedItem as ViewSchedule)?.Name ?? "null"}");
+                    DebugLog($"ComboBox SelectedIndex: {comboBox?.SelectedIndex}");
+                    DebugLog($"ViewModel SelectedSchedule after ComboBox change: {_viewModel.SelectedSchedule?.Name ?? "null"}");
+                };
+                
                 // Setup Excel-like behaviors
                 SetupExcelLikeBehaviors();
                 DebugLog("Excel-like behaviors setup completed");
@@ -96,6 +106,50 @@ namespace RevitScheduleEditor
             {
                 DebugLog($"ERROR in ScheduleEditorWindow constructor: {ex.Message}\n{ex.StackTrace}");
                 throw;
+            }
+        }
+
+        // Non-blocking notification helper for window
+        private void ShowNonBlockingNotification(string message, string title = "Thông báo", int autoCloseSeconds = 3)
+        {
+            try
+            {
+                Application.Current?.Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    var notificationWindow = new Window
+                    {
+                        Title = title,
+                        Content = new TextBlock
+                        {
+                            Text = message,
+                            Margin = new Thickness(20),
+                            TextWrapping = TextWrapping.Wrap,
+                            MaxWidth = 400
+                        },
+                        SizeToContent = SizeToContent.WidthAndHeight,
+                        WindowStartupLocation = WindowStartupLocation.CenterScreen,
+                        Topmost = true,
+                        ResizeMode = ResizeMode.NoResize,
+                        ShowInTaskbar = false, // Notification không cần taskbar
+                        // Bỏ Owner để tránh lock trong Revit add-in
+                    };
+
+                    notificationWindow.Show();
+
+                    // Auto-close timer
+                    var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(autoCloseSeconds) };
+                    timer.Tick += (s, e) =>
+                    {
+                        timer.Stop();
+                        notificationWindow.Close();
+                    };
+                    timer.Start();
+                }));
+            }
+            catch (Exception ex)
+            {
+                // Fallback to debug log if UI fails
+                DebugLog($"ShowNonBlockingNotification failed: {ex.Message}. Original message: {message}");
             }
         }
 
@@ -734,7 +788,7 @@ namespace RevitScheduleEditor
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error applying filter: {ex.Message}", "Filter Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                ShowNonBlockingNotification($"Lỗi khi áp dụng bộ lọc: {ex.Message}", "Lỗi Bộ Lọc", 5);
             }
         }
 
@@ -1480,8 +1534,7 @@ namespace RevitScheduleEditor
             else
             {
                 DebugLog("FillSeries_Click - Not enough cells selected for Fill Series");
-                MessageBox.Show("Vui lòng chọn ít nhất 2 cell để sử dụng Fill Series.", "Fill Series", 
-                               MessageBoxButton.OK, MessageBoxImage.Information);
+                ShowNonBlockingNotification("Vui lòng chọn ít nhất 2 cell để sử dụng Fill Series.", "Fill Series");
             }
         }
 
@@ -1509,15 +1562,13 @@ namespace RevitScheduleEditor
                 else
                 {
                     DebugLog("SelectHighlightedElements_Click - ViewModel is null");
-                    MessageBox.Show("Không thể truy cập ViewModel.", "Error", 
-                                   MessageBoxButton.OK, MessageBoxImage.Error);
+                    ShowNonBlockingNotification("Không thể truy cập ViewModel.", "Lỗi", 3);
                 }
             }
             catch (Exception ex)
             {
                 DebugLog($"SelectHighlightedElements_Click - Error: {ex.Message}");
-                MessageBox.Show($"Lỗi khi chọn elements: {ex.Message}", "Error", 
-                               MessageBoxButton.OK, MessageBoxImage.Error);
+                ShowNonBlockingNotification($"Lỗi khi chọn elements: {ex.Message}", "Lỗi", 5);
             }
         }
 
@@ -1545,15 +1596,13 @@ namespace RevitScheduleEditor
                 else
                 {
                     DebugLog("ShowHighlightedElements_Click - ViewModel is null");
-                    MessageBox.Show("Không thể truy cập ViewModel.", "Error", 
-                                   MessageBoxButton.OK, MessageBoxImage.Error);
+                    ShowNonBlockingNotification("Không thể truy cập ViewModel.", "Lỗi", 3);
                 }
             }
             catch (Exception ex)
             {
                 DebugLog($"ShowHighlightedElements_Click - Error: {ex.Message}");
-                MessageBox.Show($"Lỗi khi hiển thị thông tin elements: {ex.Message}", "Error", 
-                               MessageBoxButton.OK, MessageBoxImage.Error);
+                ShowNonBlockingNotification($"Lỗi khi hiển thị thông tin elements: {ex.Message}", "Lỗi", 5);
             }
         }
 
@@ -2096,14 +2145,12 @@ namespace RevitScheduleEditor
                 DebugLog("ClearAllFiltersButton_Click - Updated filter status display");
                 
                 // Show success message
-                MessageBox.Show("Tất cả bộ lọc đã được xóa. Hiển thị toàn bộ dữ liệu.", 
-                              "Xóa Bộ Lọc", MessageBoxButton.OK, MessageBoxImage.Information);
+                ShowNonBlockingNotification("Tất cả bộ lọc đã được xóa. Hiển thị toàn bộ dữ liệu.", "Xóa Bộ Lọc");
             }
             catch (Exception ex)
             {
                 DebugLog($"ClearAllFiltersButton_Click - Error: {ex.Message}");
-                MessageBox.Show($"Lỗi khi xóa bộ lọc: {ex.Message}", 
-                              "Lỗi", MessageBoxButton.OK, MessageBoxImage.Error);
+                ShowNonBlockingNotification($"Lỗi khi xóa bộ lọc: {ex.Message}", "Lỗi", 5);
             }
         }
         

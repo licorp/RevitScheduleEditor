@@ -227,7 +227,7 @@
                       ItemsSource="{Binding Schedules}"
                       SelectedItem="{Binding SelectedSchedule}"
                       DisplayMemberPath="Name"
-                      IsEditable="True"
+                      IsEditable="False"
                       IsTextSearchEnabled="True"
                       StaysOpenOnEdit="True"/>
             

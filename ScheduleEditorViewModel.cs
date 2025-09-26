@@ -15,6 +15,7 @@ using System.Windows.Data;
 using System.Windows.Input;
 using System.Threading.Tasks;
 using System.Threading;
+using System.Windows.Threading;
 
 namespace RevitScheduleEditor
 {
@@ -108,6 +109,50 @@ namespace RevitScheduleEditor
         [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Ansi)]
         private static extern void OutputDebugStringA(string lpOutputString);
 
+        // Non-blocking notification helper
+        private void ShowNonBlockingNotification(string message, string title = "Thông báo", int autoCloseSeconds = 3)
+        {
+            try
+            {
+                Application.Current?.Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    var notificationWindow = new Window
+                    {
+                        Title = title,
+                        Content = new TextBlock
+                        {
+                            Text = message,
+                            Margin = new Thickness(20),
+                            TextWrapping = TextWrapping.Wrap,
+                            MaxWidth = 400
+                        },
+                        SizeToContent = SizeToContent.WidthAndHeight,
+                        WindowStartupLocation = WindowStartupLocation.CenterScreen,
+                        Topmost = true,
+                        ResizeMode = ResizeMode.NoResize,
+                        ShowInTaskbar = false, // Notification không cần taskbar
+                        // Bỏ Owner để tránh lock trong Revit add-in
+                    };
+
+                    notificationWindow.Show();
+
+                    // Auto-close timer
+                    var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(autoCloseSeconds) };
+                    timer.Tick += (s, e) =>
+                    {
+                        timer.Stop();
+                        notificationWindow.Close();
+                    };
+                    timer.Start();
+                }));
+            }
+            catch (Exception ex)
+            {
+                // Fallback to debug log if UI fails
+                DebugLog($"ShowNonBlockingNotification failed: {ex.Message}. Original message: {message}");
+            }
+        }
+
         // Progress properties for data binding
         public bool IsLoadingData
         {
@@ -116,6 +161,11 @@ namespace RevitScheduleEditor
             {
                 _isLoadingData = value;
                 OnPropertyChanged(nameof(IsLoadingData));
+                
+                // Force command re-evaluation when loading state changes
+                System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+                
+                DebugLog($"IsLoadingData set to: {value}");
             }
         }
 
@@ -182,8 +232,17 @@ namespace RevitScheduleEditor
         public ICommand SelectHighlightedElementsCommand { get; }
         public ICommand ShowHighlightedElementsCommand { get; }
         
-        // New commands for the buttons
-        public ICommand PreviewEditCommand { get; }
+        // New commands for the buttons - with backing field for PreviewEditCommand  
+        private ICommand _previewEditCommand;
+        public ICommand PreviewEditCommand 
+        { 
+            get => _previewEditCommand;
+            private set
+            {
+                _previewEditCommand = value;
+                OnPropertyChanged();
+            }
+        }
         public ICommand ImportCommand { get; }
         public ICommand ExportCommand { get; }
         public ICommand CancelLoadingCommand { get; }
@@ -193,9 +252,82 @@ namespace RevitScheduleEditor
             get => _selectedSchedule;
             set
             {
+                DebugLog($"SelectedSchedule setter called - Old: {_selectedSchedule?.Name ?? "null"}, New: {value?.Name ?? "null"}");
+                
                 _selectedSchedule = value;
                 OnPropertyChanged();
+                
+                // Force immediate command re-evaluation
+                System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+                DebugLog($"Commands invalidated immediately for SelectedSchedule: {_selectedSchedule?.Name ?? "null"}");
+                
+                // Also force PreviewEditCommand to re-evaluate specifically
+                if (PreviewEditCommand is RelayCommand cmd)
+                {
+                    cmd.RaiseCanExecuteChanged();
+                    DebugLog($"PreviewEditCommand.RaiseCanExecuteChanged() called");
+                }
+                
+                // NUCLEAR OPTION: Recreate the command object entirely to force UI rebinding
+                if (_selectedSchedule != null)
+                {
+                    DebugLog($"Recreating PreviewEditCommand to force UI rebinding");
+                    _previewEditCommand = new RelayCommand(ExecutePreviewEdit, CanExecutePreviewEdit);
+                    OnPropertyChanged(nameof(PreviewEditCommand));
+                    DebugLog($"PreviewEditCommand recreated and PropertyChanged fired");
+                }
+                
+                // Force PropertyChanged for PreviewEditCommand to trigger UI rebinding
+                OnPropertyChanged(nameof(PreviewEditCommand));
+                DebugLog($"OnPropertyChanged(PreviewEditCommand) called");
+                
+                // Force UI update using Dispatcher with higher priority - with error handling
+                try 
+                {
+                    var app = Application.Current;
+                    var dispatcher = app?.Dispatcher;
+                    DebugLog($"Application.Current: {app != null}, Dispatcher: {dispatcher != null}");
+                    
+                    if (dispatcher != null)
+                    {
+                        dispatcher.BeginInvoke(new Action(() =>
+                        {
+                            try
+                            {
+                                DebugLog($"Dispatcher callback executed - about to check CanExecutePreviewEdit again");
+                                var canExecute = CanExecutePreviewEdit(null);
+                                DebugLog($"Force CanExecutePreviewEdit check result: {canExecute}");
+                                System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+                            }
+                            catch (Exception dispEx)
+                            {
+                                DebugLog($"Error in Dispatcher callback: {dispEx.Message}");
+                            }
+                        }), DispatcherPriority.DataBind);
+                        DebugLog($"Dispatcher.BeginInvoke called successfully");
+                    }
+                    else
+                    {
+                        DebugLog($"Dispatcher is null - using immediate command check");
+                        var canExecute = CanExecutePreviewEdit(null);
+                        DebugLog($"Immediate CanExecutePreviewEdit check result: {canExecute}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    DebugLog($"Error setting up Dispatcher: {ex.Message}");
+                }
+                
+                DebugLog($"SelectedSchedule property changed and commands invalidated");
+                
                 // Don't auto-load data anymore - user needs to click Preview/Edit
+                
+                // Show helpful hint when schedule is selected
+                if (_selectedSchedule != null && (ScheduleData == null || ScheduleData.Count == 0))
+                {
+                    DebugLog($"Showing notification for selected schedule: {_selectedSchedule.Name}");
+                    ShowNonBlockingNotification($"Đã chọn '{_selectedSchedule.Name}'. Nhấn nút 'Preview/Edit' để tải dữ liệu.", "Gợi ý", 3);
+                }
             }
         }
         
@@ -239,7 +371,7 @@ namespace RevitScheduleEditor
                 ShowHighlightedElementsCommand = new RelayCommand(ExecuteShowHighlightedElements, CanExecuteShowHighlightedElements);
                 
                 // New commands
-                PreviewEditCommand = new RelayCommand(ExecutePreviewEdit, CanExecutePreviewEdit);
+                _previewEditCommand = new RelayCommand(ExecutePreviewEdit, CanExecutePreviewEdit);
                 ImportCommand = new RelayCommand(ExecuteImport, CanExecuteImport);
                 ExportCommand = new RelayCommand(ExecuteExport, CanExecuteExport);
                 
@@ -279,14 +411,20 @@ namespace RevitScheduleEditor
                 
                 DebugLog($"Found {schedules.Count} schedules in document");
                 
+                if (schedules.Count == 0)
+                {
+                    DebugLog("WARNING: No schedules found in document!");
+                    ShowNonBlockingNotification("Không tìm thấy schedule nào trong document!", "Không có Schedule", 3);
+                }
+                
                 Schedules.Clear();
                 foreach (var s in schedules)
                 {
                     Schedules.Add(s);
-                    DebugLog($"Added schedule: {s.Name}");
+                    DebugLog($"Added schedule: {s.Name} (ID: {s.Id})");
                 }
                 
-                DebugLog("LoadSchedules completed successfully");
+                DebugLog($"LoadSchedules completed successfully - Total schedules in collection: {Schedules.Count}");
             }
             catch (Exception ex)
             {
@@ -302,7 +440,7 @@ namespace RevitScheduleEditor
             
             if (SelectedSchedule == null)
             {
-                MessageBox.Show("Please select a schedule first.", "No Schedule Selected");
+                ShowNonBlockingNotification("Vui lòng chọn một schedule trước.", "Chưa chọn Schedule");
                 return;
             }
 
@@ -334,7 +472,10 @@ namespace RevitScheduleEditor
 
         private bool CanExecutePreviewEdit(object obj)
         {
-            return SelectedSchedule != null && !IsLoadingData;
+            var canExecute = SelectedSchedule != null && !IsLoadingData;
+            var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
+            DebugLog($"[{timestamp}] CanExecutePreviewEdit - SelectedSchedule: {SelectedSchedule?.Name ?? "null"}, IsLoadingData: {IsLoadingData}, Result: {canExecute}");
+            return canExecute;
         }
 
         private void ExecuteCancelLoading(object obj)
@@ -443,7 +584,7 @@ namespace RevitScheduleEditor
             {
                 LoadingStatus = $"❌ Error: {ex.Message}";
                 DebugLog($"Error during loading: {ex}");
-                MessageBox.Show($"Error loading schedule data: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                ShowNonBlockingNotification($"Lỗi khi tải dữ liệu schedule: {ex.Message}", "Lỗi", 5);
             }
             finally
             {
@@ -529,27 +670,15 @@ namespace RevitScheduleEditor
             DebugLog("Using large schedule progressive loading strategy");
             
             // Show user choice for large schedules with speed optimization
-            var result = MessageBox.Show(
-                $"⚡ ULTRA-FAST LOADING for {TotalElements} items\n\n" +
-                "🚀 RECOMMENDED STRATEGY:\n" +
-                "• YES = Progressive Loading (Load 1000 items instantly, then continue in background)\n" +
-                "• NO = Load all items with parallel processing (faster than before)\n" +
-                "• CANCEL = Cancel loading\n\n" +
-                "⚡ New: Parallel processing enabled for 5-10x faster loading!",
-                "🚀 Ultra-Fast Schedule Loading", 
-                MessageBoxButton.YesNoCancel, 
-                MessageBoxImage.Information);
-
-            if (result == MessageBoxResult.Cancel)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                return;
-            }
+            // Use progressive loading by default for non-blocking experience
+            var useProgressiveLoading = true; // Default to progressive loading
+            
+            ShowNonBlockingNotification($"Đang tải {TotalElements:N0} phần tử với chế độ Progressive Loading để tối ưu hiệu năng.", "Tải dữ liệu lớn", 2);
 
             var elements = collector.ToElements();
             DebugLog($"Retrieved {elements.Count} elements for processing");
             
-            if (result == MessageBoxResult.Yes)
+            if (useProgressiveLoading)
             {
                 // Progressive loading: 1000 first, then background loading
                 await LoadProgressiveAsync(elements, visibleFields, cancellationToken);
@@ -621,16 +750,14 @@ namespace RevitScheduleEditor
                 DebugLog($"Progressive loading completed - Total: {overallSpeed:F0} items/sec");
                 
                 // Show completion notification with performance stats
-                MessageBox.Show(
-                    $"🚀 Ultra-Fast Progressive Loading Complete!\n\n" +
-                    $"📊 Performance Statistics:\n" +
-                    $"Phase 1: {itemsLoaded} items in {phase1Duration.TotalSeconds:F1}s ({speed1:F0} items/sec)\n" +
-                    $"Phase 2: {remainingElements.Count} items in {phase2Duration.TotalSeconds:F1}s ({speed2:F0} items/sec)\n" +
-                    $"Overall: {totalElements} items in {totalDuration.TotalSeconds:F1}s ({overallSpeed:F0} items/sec)\n\n" +
-                    $"✅ You can now work with the complete dataset!",
-                    "🚀 Progressive Loading Complete",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information);
+                ShowNonBlockingNotification(
+                    $"🚀 Hoàn tất tải dữ liệu!\n\n" +
+                    $"📊 Thống kê hiệu năng:\n" +
+                    $"Giai đoạn 1: {itemsLoaded} phần tử trong {phase1Duration.TotalSeconds:F1}s ({speed1:F0} phần tử/giây)\n" +
+                    $"Giai đoạn 2: {remainingElements.Count} phần tử trong {phase2Duration.TotalSeconds:F1}s ({speed2:F0} phần tử/giây)\n" +
+                    $"Tổng thể: {totalElements} phần tử trong {totalDuration.TotalSeconds:F1}s ({overallSpeed:F0} phần tử/giây)\n\n" +
+                    $"✅ Bạn có thể làm việc với toàn bộ dữ liệu!",
+                    "🚀 Hoàn tất Progressive Loading", 5);
             }
             else
             {
@@ -933,7 +1060,7 @@ namespace RevitScheduleEditor
                     
                     trans.Commit();
                     DebugLog($"Transaction committed. Updated {updatedCount} parameters.");
-                    MessageBox.Show($"Updated {updatedCount} parameters.", "Success");
+                    ShowNonBlockingNotification($"Đã cập nhật {updatedCount} tham số.", "Thành công");
                 }
                 
                 DebugLog("UpdateModel completed successfully");
@@ -941,7 +1068,7 @@ namespace RevitScheduleEditor
             catch (Exception ex)
             {
                 DebugLog($"ERROR in UpdateModel: {ex.Message}\n{ex.StackTrace}");
-                MessageBox.Show($"Error updating model: {ex.Message}", "Error");
+                ShowNonBlockingNotification($"Lỗi khi cập nhật model: {ex.Message}", "Lỗi", 5);
             }
         }
         
@@ -1034,7 +1161,7 @@ namespace RevitScheduleEditor
             catch (Exception ex)
             {
                 DebugLog($"Copy error: {ex.Message}");
-                MessageBox.Show($"Copy failed: {ex.Message}", "Copy Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                ShowNonBlockingNotification($"Lỗi Copy: {ex.Message}", "Lỗi Copy", 5);
             }
         }
 
@@ -1152,7 +1279,7 @@ namespace RevitScheduleEditor
             catch (Exception ex)
             {
                 DebugLog($"Paste error: {ex.Message}");
-                MessageBox.Show($"Paste failed: {ex.Message}", "Paste Error", MessageBoxButton.OK, MessageBoxImage.Warning);
+                ShowNonBlockingNotification($"Lỗi Paste: {ex.Message}", "Lỗi Paste", 5);
             }
         }
 
@@ -1652,26 +1779,40 @@ namespace RevitScheduleEditor
         {
             try
             {
+                // Use non-blocking approach for file dialogs
                 var openFileDialog = new Microsoft.Win32.OpenFileDialog
                 {
                     Filter = "CSV files (*.csv)|*.csv|Excel files (*.xlsx)|*.xlsx|All files (*.*)|*.*",
-                    Title = "Select CSV or Excel file to import"
+                    Title = "Chọn file CSV hoặc Excel để import"
                 };
 
-                if (openFileDialog.ShowDialog() == true)
+                // Show dialog on main thread without blocking
+                Application.Current?.Dispatcher.BeginInvoke(new Action(() =>
                 {
-                    ImportFromExcel(openFileDialog.FileName);
-                }
+                    try
+                    {
+                        var result = openFileDialog.ShowDialog();
+                        if (result == true)
+                        {
+                            ImportFromExcel(openFileDialog.FileName);
+                            ShowNonBlockingNotification("Import thành công!", "Import hoàn tất");
+                        }
+                    }
+                    catch (Exception dialogEx)
+                    {
+                        ShowNonBlockingNotification($"Lỗi import dữ liệu: {dialogEx.Message}", "Lỗi Import", 5);
+                    }
+                }));
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error importing data: {ex.Message}", "Import Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                ShowNonBlockingNotification($"Lỗi import dữ liệu: {ex.Message}", "Lỗi Import", 5);
             }
         }
 
         private bool CanExecuteImport(object parameter)
         {
-            return SelectedSchedule != null && ScheduleData.Count > 0;
+            return SelectedSchedule != null && ScheduleData != null && ScheduleData.Count > 0;
         }
 
         // Export Command
@@ -1679,34 +1820,47 @@ namespace RevitScheduleEditor
         {
             try
             {
-                if (ScheduleData.Count == 0)
+                if (ScheduleData == null || ScheduleData.Count == 0)
                 {
-                    MessageBox.Show("No data to export.", "No Data", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    ShowNonBlockingNotification("Không có dữ liệu để export.", "Không có dữ liệu", 3);
                     return;
                 }
 
+                // Use non-blocking approach for file dialogs
                 var saveFileDialog = new Microsoft.Win32.SaveFileDialog
                 {
                     Filter = "Excel files (*.xlsx)|*.xlsx",
-                    Title = "Save Excel file",
+                    Title = "Lưu file Excel",
                     FileName = $"{SelectedSchedule?.Name ?? "Schedule"}_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx"
                 };
 
-                if (saveFileDialog.ShowDialog() == true)
+                // Show dialog on main thread without blocking
+                Application.Current?.Dispatcher.BeginInvoke(new Action(() =>
                 {
-                    ExportToExcel(saveFileDialog.FileName);
-                    MessageBox.Show("Data exported successfully!", "Export Complete", MessageBoxButton.OK, MessageBoxImage.Information);
-                }
+                    try
+                    {
+                        var result = saveFileDialog.ShowDialog();
+                        if (result == true)
+                        {
+                            ExportToExcel(saveFileDialog.FileName);
+                            ShowNonBlockingNotification("Export dữ liệu thành công!", "Export hoàn tất");
+                        }
+                    }
+                    catch (Exception dialogEx)
+                    {
+                        ShowNonBlockingNotification($"Lỗi export dữ liệu: {dialogEx.Message}", "Lỗi Export", 5);
+                    }
+                }));
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error exporting data: {ex.Message}", "Export Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                ShowNonBlockingNotification($"Lỗi export dữ liệu: {ex.Message}", "Lỗi Export", 5);
             }
         }
 
         private bool CanExecuteExport(object parameter)
         {
-            return ScheduleData.Count > 0;
+            return ScheduleData != null && ScheduleData.Count > 0;
         }
 
         #endregion
@@ -1835,11 +1989,56 @@ namespace RevitScheduleEditor
                         uidoc.Selection.SetElementIds(elementIdsList);
                         
                         DebugLog($"ExecuteSelectHighlightedElements - Selected {elementIds.Count} elements in Revit");
-                        System.Windows.MessageBox.Show(
-                            $"🎯 Đã chọn {elementIds.Count} element(s) trong Revit model!\n\nElement IDs: {string.Join(", ", elementIds.Select(id => id.IntegerValue))}", 
-                            "Select Highlighted Elements", 
-                            System.Windows.MessageBoxButton.OK, 
-                            System.Windows.MessageBoxImage.Information);
+                        
+                        // Tạo non-blocking notification window
+                        var notificationWindow = new Window
+                        {
+                            Title = "🎯 Select Elements - Success",
+                            Width = 400,
+                            Height = 180,
+                            WindowStartupLocation = System.Windows.WindowStartupLocation.CenterScreen,
+                            ResizeMode = ResizeMode.NoResize,
+                            Topmost = true,
+                            ShowInTaskbar = false,
+                            Content = new System.Windows.Controls.StackPanel
+                            {
+                                Margin = new System.Windows.Thickness(20),
+                                Children = 
+                                {
+                                    new System.Windows.Controls.TextBlock
+                                    {
+                                        Text = $"🎯 Đã chọn {elementIds.Count} element(s) trong Revit model!",
+                                        FontSize = 14,
+                                        FontWeight = System.Windows.FontWeights.Bold,
+                                        Margin = new System.Windows.Thickness(0, 0, 0, 10),
+                                        TextWrapping = System.Windows.TextWrapping.Wrap
+                                    },
+                                    new System.Windows.Controls.TextBlock
+                                    {
+                                        Text = $"Element IDs: {string.Join(", ", elementIds.Select(id => id.IntegerValue))}",
+                                        FontSize = 11,
+                                        Foreground = System.Windows.Media.Brushes.Gray,
+                                        TextWrapping = System.Windows.TextWrapping.Wrap
+                                    }
+                                }
+                            }
+                        };
+                        
+                        // Hiển thị non-modal và auto-close sau 3 giây
+                        notificationWindow.Show();
+                        
+                        // Auto close after 3 seconds
+                        var timer = new System.Windows.Threading.DispatcherTimer();
+                        timer.Interval = TimeSpan.FromSeconds(3);
+                        timer.Tick += (sender, e) => 
+                        {
+                            timer.Stop();
+                            if (notificationWindow.IsVisible)
+                            {
+                                notificationWindow.Close();
+                            }
+                        };
+                        timer.Start();
                     }
                     else
                     {
@@ -1988,60 +2187,63 @@ namespace RevitScheduleEditor
                         
                         DebugLog($"ExecuteShowHighlightedElements - Showing info for {elementIds.Count} elements");
                         
-                        // Hiển thị trong dialog với scroll và resize được
-                        var infoWindow = new Window
+                        // Hiển thị window async để hoàn toàn không block Revit
+                        Application.Current?.Dispatcher.BeginInvoke(new Action(() =>
                         {
-                            Title = "👁️ Show Highlighted Elements Info",
-                            Width = 600,
-                            Height = 500,
-                            WindowStartupLocation = System.Windows.WindowStartupLocation.CenterOwner,
-                            Owner = _parentWindow,
-                            ResizeMode = ResizeMode.CanResize,
-                            Content = new ScrollViewer
+                            var infoWindow = new Window
                             {
-                                VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto,
-                                HorizontalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto,
-                                Content = new System.Windows.Controls.TextBlock
+                                Title = "👁️ Show Highlighted Elements Info",
+                                Width = 600,
+                                Height = 500,
+                                WindowStartupLocation = System.Windows.WindowStartupLocation.CenterScreen,
+                                // Bỏ Owner để tránh lock trong Revit add-in
+                                ResizeMode = ResizeMode.CanResize,
+                                Topmost = true, // Giữ window trên cùng
+                                ShowInTaskbar = true, // Hiển thị trong taskbar
+                                Content = new ScrollViewer
                                 {
-                                    Text = fullMessage,
-                                    Margin = new System.Windows.Thickness(15),
-                                    TextWrapping = System.Windows.TextWrapping.Wrap,
-                                    FontFamily = new System.Windows.Media.FontFamily("Consolas, Courier New"),
-                                    FontSize = 12
+                                    VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto,
+                                    HorizontalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto,
+                                    Content = new System.Windows.Controls.TextBlock
+                                    {
+                                        Text = fullMessage,
+                                        Margin = new System.Windows.Thickness(15),
+                                        TextWrapping = System.Windows.TextWrapping.Wrap,
+                                        FontFamily = new System.Windows.Media.FontFamily("Consolas, Courier New"),
+                                        FontSize = 12
+                                    }
                                 }
-                            }
-                        };
-                        
-                        infoWindow.ShowDialog();
+                            };
+                            
+                            // Show window non-blocking
+                            infoWindow.Show();
+                            
+                            // Đưa window lên foreground
+                            infoWindow.Activate();
+                        }));
                     }
                     else
                     {
                         DebugLog("ExecuteShowHighlightedElements - No valid ElementIds found");
-                        System.Windows.MessageBox.Show(
+                        ShowNonBlockingNotification(
                             "Không tìm thấy ElementId hợp lệ trong dòng được chọn.", 
-                            "Show Highlighted Elements", 
-                            System.Windows.MessageBoxButton.OK, 
-                            System.Windows.MessageBoxImage.Warning);
+                            "Show Highlighted Elements", 3);
                     }
                 }
                 else
                 {
                     DebugLog("ExecuteShowHighlightedElements - No rows found");
-                    System.Windows.MessageBox.Show(
+                    ShowNonBlockingNotification(
                         "Không tìm thấy dòng nào để xử lý.\nVui lòng nhấp chuột phải trên dòng có dữ liệu.", 
-                        "Show Highlighted Elements", 
-                        System.Windows.MessageBoxButton.OK, 
-                        System.Windows.MessageBoxImage.Information);
+                        "Show Highlighted Elements", 3);
                 }
             }
             catch (Exception ex)
             {
                 DebugLog($"ExecuteShowHighlightedElements - Error: {ex.Message}");
-                System.Windows.MessageBox.Show(
+                ShowNonBlockingNotification(
                     $"Lỗi khi hiển thị thông tin elements: {ex.Message}", 
-                    "Error", 
-                    System.Windows.MessageBoxButton.OK, 
-                    System.Windows.MessageBoxImage.Error);
+                    "Lỗi", 5);
             }
         }
         
