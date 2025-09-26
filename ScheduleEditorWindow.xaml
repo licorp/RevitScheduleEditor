@@ -320,6 +320,9 @@
                     <MenuItem Header="Autofill" Command="{Binding AutofillCommand}" CommandParameter="{Binding SelectedCells, RelativeSource={RelativeSource AncestorType=DataGrid}}" InputGestureText="Ctrl+F"/>
                     <MenuItem Header="📊 Fill Series" Click="FillSeries_Click" InputGestureText="Ctrl+Shift+Enter" FontWeight="SemiBold"/>
                     <Separator/>
+                    <MenuItem Header="🎯 Select Highlighted Elements" Click="SelectHighlightedElements_Click" InputGestureText="Select in Revit" FontWeight="SemiBold"/>
+                    <MenuItem Header="👁️ Show Highlighted Elements" Click="ShowHighlightedElements_Click" InputGestureText="Show Element Info" FontWeight="SemiBold"/>
+                    <Separator/>
                     <MenuItem Header="Undo" Command="{Binding UndoCommand}" InputGestureText="Ctrl+Z"/>
                     <MenuItem Header="Redo" Command="{Binding RedoCommand}" InputGestureText="Ctrl+Y"/>
                 </ContextMenu>

@@ -52,8 +52,8 @@ namespace RevitScheduleEditor
                 InitializeComponent();
                 DebugLog("InitializeComponent completed");
                 
-                _viewModel = new ScheduleEditorViewModel(doc);
-                DebugLog("ScheduleEditorViewModel created");
+                _viewModel = new ScheduleEditorViewModel(doc, this); // Pass this window to ViewModel
+                DebugLog("ScheduleEditorViewModel created with parent window reference");
                 
                 this.DataContext = _viewModel;
                 DebugLog("DataContext set to ViewModel");
@@ -177,24 +177,22 @@ namespace RevitScheduleEditor
                 DebugLog($"MouseUp - Button: {e.ChangedButton}, SelectedCells after: {selectedCellsCount}");
             };
 
-            // Add context menu for copy/paste
-            var contextMenu = new ContextMenu();
-            
-            var copyMenuItem = new MenuItem { Header = "Copy (Ctrl+C)" };
-            copyMenuItem.Click += (s, e) => {
-                DebugLog("Context menu Copy clicked");
-                CopyCells();
-            };
-            
-            var pasteMenuItem = new MenuItem { Header = "Paste (Ctrl+V)" };
-            pasteMenuItem.Click += (s, e) => {
-                DebugLog("Context menu Paste clicked");
-                PasteCells();
-            };
-            
-            contextMenu.Items.Add(copyMenuItem);
-            contextMenu.Items.Add(pasteMenuItem);
-            dataGrid.ContextMenu = contextMenu;
+            // Context menu is now defined in XAML - no need to create it here
+            // The code-behind context menu was overriding the XAML one
+            // var contextMenu = new ContextMenu();
+            // var copyMenuItem = new MenuItem { Header = "Copy (Ctrl+C)" };
+            // copyMenuItem.Click += (s, e) => {
+            //     DebugLog("Context menu Copy clicked");
+            //     CopyCells();
+            // };
+            // var pasteMenuItem = new MenuItem { Header = "Paste (Ctrl+V)" };
+            // pasteMenuItem.Click += (s, e) => {
+            //     DebugLog("Context menu Paste clicked");
+            //     PasteCells();
+            // };
+            // contextMenu.Items.Add(copyMenuItem);
+            // contextMenu.Items.Add(pasteMenuItem);
+            // dataGrid.ContextMenu = contextMenu;
 
             dataGrid.CurrentCellChanged += (sender, e) =>
             {
@@ -1484,6 +1482,132 @@ namespace RevitScheduleEditor
                 DebugLog("FillSeries_Click - Not enough cells selected for Fill Series");
                 MessageBox.Show("Vui lòng chọn ít nhất 2 cell để sử dụng Fill Series.", "Fill Series", 
                                MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+        }
+
+        /// <summary>
+        /// Context menu click handler cho Select Highlighted Elements
+        /// </summary>
+        private void SelectHighlightedElements_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                DebugLog("SelectHighlightedElements_Click - Starting");
+                
+                var viewModel = this.DataContext as ScheduleEditorViewModel;
+                if (viewModel != null)
+                {
+                    // Lấy dòng tại vị trí chuột thay vì dựa vào selection
+                    var rowAtMousePosition = GetRowAtMousePosition();
+                    
+                    // Gọi command từ ViewModel với row được detect
+                    if (viewModel.SelectHighlightedElementsCommand?.CanExecute(rowAtMousePosition) == true)
+                    {
+                        viewModel.SelectHighlightedElementsCommand.Execute(rowAtMousePosition);
+                    }
+                }
+                else
+                {
+                    DebugLog("SelectHighlightedElements_Click - ViewModel is null");
+                    MessageBox.Show("Không thể truy cập ViewModel.", "Error", 
+                                   MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"SelectHighlightedElements_Click - Error: {ex.Message}");
+                MessageBox.Show($"Lỗi khi chọn elements: {ex.Message}", "Error", 
+                               MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>
+        /// Context menu click handler cho Show Highlighted Elements
+        /// </summary>
+        private void ShowHighlightedElements_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                DebugLog("ShowHighlightedElements_Click - Starting");
+                
+                var viewModel = this.DataContext as ScheduleEditorViewModel;
+                if (viewModel != null)
+                {
+                    // Lấy dòng tại vị trí chuột thay vì dựa vào selection
+                    var rowAtMousePosition = GetRowAtMousePosition();
+                    
+                    // Gọi command từ ViewModel với row được detect
+                    if (viewModel.ShowHighlightedElementsCommand?.CanExecute(rowAtMousePosition) == true)
+                    {
+                        viewModel.ShowHighlightedElementsCommand.Execute(rowAtMousePosition);
+                    }
+                }
+                else
+                {
+                    DebugLog("ShowHighlightedElements_Click - ViewModel is null");
+                    MessageBox.Show("Không thể truy cập ViewModel.", "Error", 
+                                   MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"ShowHighlightedElements_Click - Error: {ex.Message}");
+                MessageBox.Show($"Lỗi khi hiển thị thông tin elements: {ex.Message}", "Error", 
+                               MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        /// <summary>
+        /// Lấy ScheduleRow tại vị trí chuột khi nhấp chuột phải
+        /// </summary>
+        private ScheduleRow GetRowAtMousePosition()
+        {
+            try
+            {
+                var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
+                if (dataGrid == null)
+                {
+                    DebugLog("GetRowAtMousePosition - DataGrid is null");
+                    return null;
+                }
+
+                // Lấy vị trí chuột hiện tại relative to DataGrid
+                var mousePosition = Mouse.GetPosition(dataGrid);
+                DebugLog($"GetRowAtMousePosition - Mouse position: {mousePosition.X}, {mousePosition.Y}");
+
+                // Tìm element tại vị trí chuột
+                var hitTestResult = VisualTreeHelper.HitTest(dataGrid, mousePosition);
+                if (hitTestResult?.VisualHit == null)
+                {
+                    DebugLog("GetRowAtMousePosition - No visual hit found");
+                    return null;
+                }
+
+                // Tìm DataGridRow từ visual hit
+                var dataGridRow = FindParent<DataGridRow>(hitTestResult.VisualHit);
+                if (dataGridRow == null)
+                {
+                    DebugLog("GetRowAtMousePosition - No DataGridRow found");
+                    return null;
+                }
+
+                // Lấy ScheduleRow từ DataContext của row
+                var scheduleRow = dataGridRow.DataContext as ScheduleRow;
+                if (scheduleRow != null)
+                {
+                    DebugLog($"GetRowAtMousePosition - Found ScheduleRow with ID: {scheduleRow.Id?.IntegerValue ?? -1}");
+                    return scheduleRow;
+                }
+                else
+                {
+                    DebugLog("GetRowAtMousePosition - DataContext is not ScheduleRow");
+                    return null;
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"GetRowAtMousePosition - Error: {ex.Message}");
+                return null;
             }
         }
 

@@ -23,6 +23,8 @@ namespace RevitScheduleEditor
         private readonly Document _doc;
         private readonly UIApplication _uiApp;
         private ViewSchedule _selectedSchedule;
+        private ScheduleEditorWindow _parentWindow; // Add reference to parent window
+        
         public ObservableCollection<ViewSchedule> Schedules { get; set; }
         
         // Use ObservableCollection base to support both Virtual and Progressive collections
@@ -177,6 +179,8 @@ namespace RevitScheduleEditor
         public ICommand FillDownCommand { get; }
         public ICommand FillRightCommand { get; }
         public ICommand ClearAllFiltersCommand { get; }
+        public ICommand SelectHighlightedElementsCommand { get; }
+        public ICommand ShowHighlightedElementsCommand { get; }
         
         // New commands for the buttons
         public ICommand PreviewEditCommand { get; }
@@ -197,14 +201,16 @@ namespace RevitScheduleEditor
         
         public ICommand UpdateModelCommand { get; }
 
-        public ScheduleEditorViewModel(Document doc)
+        public ScheduleEditorViewModel(Document doc, ScheduleEditorWindow parentWindow = null)
         {
             DebugLog("=== ScheduleEditorViewModel Constructor Started ===");
             
             try
             {
                 _doc = doc;
+                _parentWindow = parentWindow; // Store reference to parent window
                 DebugLog($"Document assigned: {doc.Title}");
+                DebugLog($"Parent window assigned: {parentWindow != null}");
                 
                 _allScheduleData = new List<ScheduleRow>();
                 Schedules = new ObservableCollection<ViewSchedule>();
@@ -229,6 +235,8 @@ namespace RevitScheduleEditor
                 FillDownCommand = new RelayCommand(ExecuteFillDown, CanExecuteFillDown);
                 FillRightCommand = new RelayCommand(ExecuteFillRight, CanExecuteFillRight);
                 ClearAllFiltersCommand = new RelayCommand(ExecuteClearAllFilters, CanExecuteClearAllFilters);
+                SelectHighlightedElementsCommand = new RelayCommand(ExecuteSelectHighlightedElements, CanExecuteSelectHighlightedElements);
+                ShowHighlightedElementsCommand = new RelayCommand(ExecuteShowHighlightedElements, CanExecuteShowHighlightedElements);
                 
                 // New commands
                 PreviewEditCommand = new RelayCommand(ExecutePreviewEdit, CanExecutePreviewEdit);
@@ -247,6 +255,13 @@ namespace RevitScheduleEditor
                 DebugLog($"ERROR in ScheduleEditorViewModel constructor: {ex.Message}\n{ex.StackTrace}");
                 throw;
             }
+        }
+        
+        // Method to set parent window reference after construction
+        public void SetParentWindow(ScheduleEditorWindow parentWindow)
+        {
+            _parentWindow = parentWindow;
+            DebugLog($"Parent window set: {parentWindow != null}");
         }
 
         private void LoadSchedules()
@@ -1742,6 +1757,298 @@ namespace RevitScheduleEditor
         {
             // This command is always available if we have data loaded
             return ScheduleData != null && ScheduleData.Count > 0;
+        }
+
+        #endregion
+
+        #region Select/Show Highlighted Elements Commands
+        
+        // Select Highlighted Elements Command - chọn element từ dòng tại vị trí chuột hoặc dòng selected
+        private void ExecuteSelectHighlightedElements(object parameter)
+        {
+            DebugLog("ExecuteSelectHighlightedElements - Starting command execution");
+            
+            try
+            {
+                List<ScheduleRow> targetRows = new List<ScheduleRow>();
+
+                // Cách 1 (Thông minh): Sử dụng ScheduleRow từ parameter (dòng tại vị trí chuột)
+                if (parameter is ScheduleRow singleRow)
+                {
+                    targetRows.Add(singleRow);
+                    DebugLog($"ExecuteSelectHighlightedElements - Using single row from mouse position: ID {singleRow.Id?.IntegerValue ?? -1}");
+                }
+                else
+                {
+                    // Cách 2 (Fallback): Sử dụng selected rows từ DataGrid
+                    DebugLog("ExecuteSelectHighlightedElements - No parameter row, falling back to selected rows");
+                    
+                    ScheduleEditorWindow window = _parentWindow;
+                    
+                    if (window == null)
+                    {
+                        DebugLog("ExecuteSelectHighlightedElements - _parentWindow is null, searching through Application windows");
+                        
+                        try
+                        {
+                            foreach (Window openWindow in System.Windows.Application.Current?.Windows ?? new WindowCollection())
+                            {
+                                if (openWindow is ScheduleEditorWindow scheduleWindow && scheduleWindow.DataContext == this)
+                                {
+                                    window = scheduleWindow;
+                                    break;
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            DebugLog($"ExecuteSelectHighlightedElements - Error searching windows: {ex.Message}");
+                        }
+                    }
+                    
+                    if (window?.ScheduleDataGrid?.SelectedItems != null)
+                    {
+                        targetRows = window.ScheduleDataGrid.SelectedItems.OfType<ScheduleRow>().ToList();
+                        DebugLog($"ExecuteSelectHighlightedElements - Found {targetRows.Count} selected rows from DataGrid");
+                    }
+                    else
+                    {
+                        DebugLog("ExecuteSelectHighlightedElements - Could not find window or selected items");
+                    }
+                }
+
+                if (targetRows.Count > 0)
+                {
+                    // Lấy danh sách ElementId từ các dòng
+                    var elementIds = targetRows
+                        .Select(row => row?.Id)
+                        .Where(id => id != null && id != ElementId.InvalidElementId)
+                        .ToList();
+                        
+                    if (elementIds.Count > 0)
+                    {
+                        // Chuyển đổi sang List<ElementId> cho Revit API
+                        var elementIdsList = new System.Collections.Generic.List<ElementId>(elementIds);
+                        
+                        // Chọn các element trong Revit
+                        var uidoc = new UIDocument(_doc);
+                        uidoc.Selection.SetElementIds(elementIdsList);
+                        
+                        DebugLog($"ExecuteSelectHighlightedElements - Selected {elementIds.Count} elements in Revit");
+                        System.Windows.MessageBox.Show(
+                            $"🎯 Đã chọn {elementIds.Count} element(s) trong Revit model!\n\nElement IDs: {string.Join(", ", elementIds.Select(id => id.IntegerValue))}", 
+                            "Select Highlighted Elements", 
+                            System.Windows.MessageBoxButton.OK, 
+                            System.Windows.MessageBoxImage.Information);
+                    }
+                    else
+                    {
+                        DebugLog("ExecuteSelectHighlightedElements - No valid ElementIds found");
+                        System.Windows.MessageBox.Show(
+                            "Không tìm thấy ElementId hợp lệ trong dòng được chọn.", 
+                            "Select Highlighted Elements", 
+                            System.Windows.MessageBoxButton.OK, 
+                            System.Windows.MessageBoxImage.Warning);
+                    }
+                }
+                else
+                {
+                    DebugLog("ExecuteSelectHighlightedElements - No rows found");
+                    System.Windows.MessageBox.Show(
+                        "Không tìm thấy dòng nào để xử lý.\nVui lòng nhấp chuột phải trên dòng có dữ liệu.", 
+                        "Select Highlighted Elements", 
+                        System.Windows.MessageBoxButton.OK, 
+                        System.Windows.MessageBoxImage.Information);
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"ExecuteSelectHighlightedElements - Error: {ex.Message}\n{ex.StackTrace}");
+                System.Windows.MessageBox.Show($"Lỗi khi chọn elements: {ex.Message}", "Error", 
+                    System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
+            }
+        }
+        
+        private bool CanExecuteSelectHighlightedElements(object parameter)
+        {
+            // Always enable the menu item - we'll check for selection in the Execute method
+            return true;
+        }
+
+        // Show Highlighted Elements Command - hiển thị thông tin element từ dòng tại vị trí chuột hoặc dòng selected
+        private void ExecuteShowHighlightedElements(object parameter)
+        {
+            DebugLog("ExecuteShowHighlightedElements - Starting command execution");
+            
+            try
+            {
+                List<ScheduleRow> targetRows = new List<ScheduleRow>();
+
+                // Cách 1 (Thông minh): Sử dụng ScheduleRow từ parameter (dòng tại vị trí chuột)
+                if (parameter is ScheduleRow singleRow)
+                {
+                    targetRows.Add(singleRow);
+                    DebugLog($"ExecuteShowHighlightedElements - Using single row from mouse position: ID {singleRow.Id?.IntegerValue ?? -1}");
+                }
+                else
+                {
+                    // Cách 2 (Fallback): Sử dụng selected rows từ DataGrid
+                    DebugLog("ExecuteShowHighlightedElements - No parameter row, falling back to selected rows");
+                    
+                    ScheduleEditorWindow window = _parentWindow;
+                    
+                    if (window == null)
+                    {
+                        DebugLog("ExecuteShowHighlightedElements - _parentWindow is null, searching through Application windows");
+                        
+                        try
+                        {
+                            foreach (Window openWindow in System.Windows.Application.Current?.Windows ?? new WindowCollection())
+                            {
+                                if (openWindow is ScheduleEditorWindow scheduleWindow && scheduleWindow.DataContext == this)
+                                {
+                                    window = scheduleWindow;
+                                    break;
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            DebugLog($"ExecuteShowHighlightedElements - Error searching windows: {ex.Message}");
+                        }
+                    }
+                    
+                    if (window?.ScheduleDataGrid?.SelectedItems != null)
+                    {
+                        targetRows = window.ScheduleDataGrid.SelectedItems.OfType<ScheduleRow>().ToList();
+                        DebugLog($"ExecuteShowHighlightedElements - Found {targetRows.Count} selected rows from DataGrid");
+                    }
+                    else
+                    {
+                        DebugLog("ExecuteShowHighlightedElements - Could not find window or selected items");
+                    }
+                }
+
+                if (targetRows.Count > 0)
+                {
+                    var elementIds = targetRows
+                        .Select(row => row?.Id)
+                        .Where(id => id != null && id != ElementId.InvalidElementId)
+                        .ToList();
+                    
+                    if (elementIds.Count > 0)
+                    {
+                        // Tạo thông tin chi tiết về các element
+                        var elementInfos = new List<string>();
+                        
+                        foreach (var elementId in elementIds)
+                        {
+                            try
+                            {
+                                var element = _doc.GetElement(elementId);
+                                if (element != null)
+                                {
+                                    var elementInfo = $"🔍 Element ID: {elementId.IntegerValue}\n" +
+                                                    $"📝 Name: {element.Name ?? "N/A"}\n" +
+                                                    $"📂 Category: {element.Category?.Name ?? "N/A"}\n" +
+                                                    $"🏷️ Type: {element.GetType().Name}\n";
+                                    
+                                    // Thêm thông tin parameters quan trọng
+                                    var parameters = element.GetOrderedParameters();
+                                    if (parameters.Count > 0)
+                                    {
+                                        elementInfo += "🔧 Key Parameters:\n";
+                                        var keyParams = parameters
+                                            .Where(p => p.HasValue && !string.IsNullOrEmpty(p.AsString()))
+                                            .Take(5) // Lấy 5 parameter đầu
+                                            .Select(p => $"  • {p.Definition.Name}: {p.AsString()}")
+                                            .ToArray();
+                                        
+                                        if (keyParams.Length > 0)
+                                        {
+                                            elementInfo += string.Join("\n", keyParams);
+                                        }
+                                        else
+                                        {
+                                            elementInfo += "  • No parameters with values";
+                                        }
+                                    }
+                                    
+                                    elementInfos.Add(elementInfo);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                elementInfos.Add($"❌ ID: {elementId.IntegerValue} - Error: {ex.Message}");
+                            }
+                        }
+                        
+                        var fullMessage = $"👁️ Thông tin chi tiết {elementIds.Count} element(s):\n\n" + 
+                                        string.Join("\n" + new string('═', 60) + "\n", elementInfos);
+                        
+                        DebugLog($"ExecuteShowHighlightedElements - Showing info for {elementIds.Count} elements");
+                        
+                        // Hiển thị trong dialog với scroll và resize được
+                        var infoWindow = new Window
+                        {
+                            Title = "👁️ Show Highlighted Elements Info",
+                            Width = 600,
+                            Height = 500,
+                            WindowStartupLocation = System.Windows.WindowStartupLocation.CenterOwner,
+                            Owner = _parentWindow,
+                            ResizeMode = ResizeMode.CanResize,
+                            Content = new ScrollViewer
+                            {
+                                VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto,
+                                HorizontalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto,
+                                Content = new System.Windows.Controls.TextBlock
+                                {
+                                    Text = fullMessage,
+                                    Margin = new System.Windows.Thickness(15),
+                                    TextWrapping = System.Windows.TextWrapping.Wrap,
+                                    FontFamily = new System.Windows.Media.FontFamily("Consolas, Courier New"),
+                                    FontSize = 12
+                                }
+                            }
+                        };
+                        
+                        infoWindow.ShowDialog();
+                    }
+                    else
+                    {
+                        DebugLog("ExecuteShowHighlightedElements - No valid ElementIds found");
+                        System.Windows.MessageBox.Show(
+                            "Không tìm thấy ElementId hợp lệ trong dòng được chọn.", 
+                            "Show Highlighted Elements", 
+                            System.Windows.MessageBoxButton.OK, 
+                            System.Windows.MessageBoxImage.Warning);
+                    }
+                }
+                else
+                {
+                    DebugLog("ExecuteShowHighlightedElements - No rows found");
+                    System.Windows.MessageBox.Show(
+                        "Không tìm thấy dòng nào để xử lý.\nVui lòng nhấp chuột phải trên dòng có dữ liệu.", 
+                        "Show Highlighted Elements", 
+                        System.Windows.MessageBoxButton.OK, 
+                        System.Windows.MessageBoxImage.Information);
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"ExecuteShowHighlightedElements - Error: {ex.Message}");
+                System.Windows.MessageBox.Show(
+                    $"Lỗi khi hiển thị thông tin elements: {ex.Message}", 
+                    "Error", 
+                    System.Windows.MessageBoxButton.OK, 
+                    System.Windows.MessageBoxImage.Error);
+            }
+        }
+        
+        private bool CanExecuteShowHighlightedElements(object parameter)
+        {
+            // Always enable the menu item - we'll check for data/selection in the Execute method
+            return true;
         }
 
         #endregion
