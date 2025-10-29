@@ -288,23 +288,28 @@
                   CanUserSortColumns="False"
                   SelectionMode="Extended"
                   SelectionUnit="Cell"
-                  ClipboardCopyMode="IncludeHeader"
+                  ClipboardCopyMode="None"
                   EnableRowVirtualization="True"
                   EnableColumnVirtualization="True"
                   VirtualizingPanel.IsVirtualizing="True"
                   VirtualizingPanel.VirtualizationMode="Recycling"
                   VirtualizingPanel.IsContainerVirtualizable="True">
             
-            <!-- Input Bindings for keyboard shortcuts -->
+            <!-- No DataGrid.CommandBindings needed - using RegisterClassCommandBinding approach -->
+            <!-- Class-level CommandBindings handle clipboard operations for DataGrid and edit elements -->
+            
+            <!-- Input Bindings to ensure Ctrl+C/V/X route to CommandBindings -->
             <DataGrid.InputBindings>
-                <KeyBinding Key="V" Modifiers="Ctrl" Command="{Binding PasteCommand}" CommandParameter="{Binding SelectedCells, RelativeSource={RelativeSource AncestorType=DataGrid}}"/>
-                <KeyBinding Key="X" Modifiers="Ctrl" Command="{Binding CutCommand}" CommandParameter="{Binding SelectedCells, RelativeSource={RelativeSource AncestorType=DataGrid}}"/>
-                <KeyBinding Key="Delete" Modifiers="Ctrl+Alt" Command="{Binding ClearAllFiltersCommand}"/>
+                <KeyBinding Command="ApplicationCommands.Copy" Gesture="Ctrl+C"/>
+                <KeyBinding Command="ApplicationCommands.Paste" Gesture="Ctrl+V"/>
+                <KeyBinding Command="ApplicationCommands.Cut" Gesture="Ctrl+X"/>
+                <!-- Keep other ViewModel bindings -->
                 <KeyBinding Key="Z" Modifiers="Ctrl" Command="{Binding UndoCommand}"/>
                 <KeyBinding Key="Y" Modifiers="Ctrl" Command="{Binding RedoCommand}"/>
                 <KeyBinding Key="D" Modifiers="Ctrl" Command="{Binding FillDownCommand}" CommandParameter="{Binding SelectedCells, RelativeSource={RelativeSource AncestorType=DataGrid}}"/>
                 <KeyBinding Key="R" Modifiers="Ctrl" Command="{Binding FillRightCommand}" CommandParameter="{Binding SelectedCells, RelativeSource={RelativeSource AncestorType=DataGrid}}"/>
                 <KeyBinding Key="F" Modifiers="Ctrl" Command="{Binding AutofillCommand}" CommandParameter="{Binding SelectedCells, RelativeSource={RelativeSource AncestorType=DataGrid}}"/>
+                <KeyBinding Key="Delete" Modifiers="Ctrl+Alt" Command="{Binding ClearAllFiltersCommand}"/>
             </DataGrid.InputBindings>
             
             <!-- Context Menu -->

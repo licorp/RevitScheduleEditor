@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -72,6 +73,14 @@ namespace RevitScheduleEditor
                 SetupExcelLikeBehaviors();
                 DebugLog("Excel-like behaviors setup completed");
                 
+                // Register class-level CommandBindings to handle clipboard operations even in edit mode
+                RegisterClassLevelCommandBindings();
+                
+                // Setup ScheduleDataGrid InputBindings for direct focus scenarios
+                SetupDataGridInputBindings();
+                
+                DebugLog("Class-level CommandBinding approach enabled - handles clipboard in view AND edit modes");
+                
                 _viewModel.PropertyChanged += (sender, args) =>
                 {
                     DebugLog($"ViewModel PropertyChanged: {args.PropertyName}");
@@ -83,7 +92,7 @@ namespace RevitScheduleEditor
                     }
                     else if (args.PropertyName == nameof(_viewModel.ScheduleData))
                     {
-                        DebugLog("ScheduleData changed - regenerating DataGrid columns");
+                        DebugLog("ScheduleData changed - regenerating ScheduleDataGrid columns");
                         // Data updated - regenerate columns only when data is loaded
                         GenerateDataGridColumns();
                     }
@@ -106,6 +115,57 @@ namespace RevitScheduleEditor
             {
                 DebugLog($"ERROR in ScheduleEditorWindow constructor: {ex.Message}\n{ex.StackTrace}");
                 throw;
+            }
+        }
+
+        /// <summary>
+        /// Đăng ký CommandBinding trên class ScheduleDataGrid để xử lý clipboard trong cả chế độ view và edit
+        /// </summary>
+        private void RegisterClassLevelCommandBindings()
+        {
+            try
+            {
+                // Buộc mọi DataGridCell và TextBox trong ScheduleDataGrid dùng cùng CommandBinding
+                CommandManager.RegisterClassCommandBinding(
+                    typeof(ScheduleDataGrid),
+                    new CommandBinding(ApplicationCommands.Copy, Copy_Executed, Copy_CanExecute));
+                
+                CommandManager.RegisterClassCommandBinding(
+                    typeof(ScheduleDataGrid),
+                    new CommandBinding(ApplicationCommands.Paste, Paste_Executed, Paste_CanExecute));
+                
+                CommandManager.RegisterClassCommandBinding(
+                    typeof(ScheduleDataGrid),
+                    new CommandBinding(ApplicationCommands.Cut, Cut_Executed, Cut_CanExecute));
+                
+                DebugLog("RegisterClassCommandBinding completed for ScheduleDataGrid class - handles edit mode TextBox");
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"Error in RegisterClassLevelCommandBindings: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Thiết lập InputBinding trực tiếp trên ScheduleDataGrid cho các trường hợp focus ScheduleDataGrid
+        /// </summary>
+        private void SetupDataGridInputBindings()
+        {
+            try
+            {
+                // Đăng ký InputBinding cho ScheduleDataGrid (xử lý khi focus ScheduleDataGrid)
+                ScheduleDataGrid.InputBindings.Add(new KeyBinding(ApplicationCommands.Copy, Key.C, ModifierKeys.Control));
+                ScheduleDataGrid.InputBindings.Add(new KeyBinding(ApplicationCommands.Paste, Key.V, ModifierKeys.Control));
+                ScheduleDataGrid.InputBindings.Add(new KeyBinding(ApplicationCommands.Cut, Key.X, ModifierKeys.Control));
+                
+                // Chặn clipboard mặc định
+                ScheduleDataGrid.ClipboardCopyMode = DataGridClipboardCopyMode.None;
+                
+                DebugLog("ScheduleDataGrid InputBindings and ClipboardCopyMode.None configured");
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"Error in SetupDataGridInputBindings: {ex.Message}");
             }
         }
 
@@ -155,18 +215,18 @@ namespace RevitScheduleEditor
 
         private void SetupExcelLikeBehaviors()
         {
-            var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
-            if (dataGrid == null) return;
+            // Use the direct reference to ScheduleDataGrid instead of FindName
+            if (ScheduleDataGrid == null) return;
 
             // Enable double-click to edit
-            dataGrid.BeginningEdit += (sender, e) =>
+            ScheduleDataGrid.BeginningEdit += (sender, e) =>
             {
                 // Save current state for undo
                 _viewModel.SaveStateForUndo();
             };
 
             // Handle cell editing
-            dataGrid.CellEditEnding += (sender, e) =>
+            ScheduleDataGrid.CellEditEnding += (sender, e) =>
             {
                 if (e.EditAction == DataGridEditAction.Commit)
                 {
@@ -191,44 +251,43 @@ namespace RevitScheduleEditor
             };
 
             // Add more debug events
-            dataGrid.BeginningEdit += (sender, e) =>
+            ScheduleDataGrid.BeginningEdit += (sender, e) =>
             {
-                DebugLog($"BeginningEdit - Starting edit for column: {e.Column?.Header}, Row: {dataGrid.Items.IndexOf(e.Row.Item)}");
+                DebugLog($"BeginningEdit - Starting edit for column: {e.Column?.Header}, Row: {ScheduleDataGrid.Items.IndexOf(e.Row.Item)}");
             };
 
-            dataGrid.PreparingCellForEdit += (sender, e) =>
+            ScheduleDataGrid.PreparingCellForEdit += (sender, e) =>
             {
                 DebugLog($"PreparingCellForEdit - Column: {e.Column?.Header}");
             };
 
             // Add selection debugging
-            dataGrid.SelectionChanged += (sender, e) =>
+            ScheduleDataGrid.SelectionChanged += (sender, e) =>
             {
-                var selectedCellsCount = dataGrid.SelectedCells?.Count ?? 0;
-                var selectedItemsCount = dataGrid.SelectedItems?.Count ?? 0;
+                var selectedCellsCount = ScheduleDataGrid.SelectedCells?.Count ?? 0;
+                var selectedItemsCount = ScheduleDataGrid.SelectedItems?.Count ?? 0;
                 DebugLog($"SelectionChanged - SelectedCells: {selectedCellsCount}, SelectedItems: {selectedItemsCount}");
                 
                 // Debug: Log first few selected cells
                 if (selectedCellsCount > 0)
                 {
-                    var firstFew = dataGrid.SelectedCells.Take(3);
+                    var firstFew = ScheduleDataGrid.SelectedCells.Take(3);
                     foreach (var cell in firstFew)
                     {
-                        DebugLog($"  Selected cell: {cell.Column?.Header} in item {dataGrid.Items.IndexOf(cell.Item)}");
+                        DebugLog($"  Selected cell: {cell.Column?.Header} in item {ScheduleDataGrid.Items.IndexOf(cell.Item)}");
                     }
                 }
             };
 
-            // Add mouse event debugging
-            dataGrid.MouseDown += (sender, e) =>
+            // Add mouse event debugging - only log when significant changes occur
+            ScheduleDataGrid.MouseUp += (sender, e) =>
             {
-                DebugLog($"MouseDown - Button: {e.ChangedButton}, Position: {e.GetPosition(dataGrid)}");
-            };
-            
-            dataGrid.MouseUp += (sender, e) =>
-            {
-                var selectedCellsCount = dataGrid.SelectedCells?.Count ?? 0;
-                DebugLog($"MouseUp - Button: {e.ChangedButton}, SelectedCells after: {selectedCellsCount}");
+                var selectedCellsCount = ScheduleDataGrid.SelectedCells?.Count ?? 0;
+                // Only log when multiple cells are selected (indicates potential copy/paste operation)
+                if (selectedCellsCount > 1)
+                {
+                    DebugLog($"MouseUp - Button: {e.ChangedButton}, SelectedCells after: {selectedCellsCount}");
+                }
             };
 
             // Context menu is now defined in XAML - no need to create it here
@@ -246,28 +305,41 @@ namespace RevitScheduleEditor
             // };
             // contextMenu.Items.Add(copyMenuItem);
             // contextMenu.Items.Add(pasteMenuItem);
-            // dataGrid.ContextMenu = contextMenu;
+            // ScheduleDataGrid.ContextMenu = contextMenu;
 
-            dataGrid.CurrentCellChanged += (sender, e) =>
+            // Reduce CurrentCellChanged logging frequency 
+            var lastLoggedCell = "";
+            ScheduleDataGrid.CurrentCellChanged += (sender, e) =>
             {
-                DebugLog($"CurrentCellChanged - Current cell: {dataGrid.CurrentCell.Column?.Header}");
+                var currentCellName = ScheduleDataGrid.CurrentCell.Column?.Header?.ToString() ?? "null";
+                // Only log when cell actually changes to reduce spam
+                if (currentCellName != lastLoggedCell)
+                {
+                    DebugLog($"CurrentCellChanged - Current cell: {currentCellName}");
+                    lastLoggedCell = currentCellName;
+                }
             };
 
-            // Handle Enter key to move to next cell (like Excel)
-            dataGrid.PreviewKeyDown += (sender, e) =>
+            // Handle Enter key to move to next cell (like Excel) - optimized logging
+            ScheduleDataGrid.PreviewKeyDown += (sender, e) =>
             {
-                DebugLog($"PreviewKeyDown - Key: {e.Key}, Modifiers: {Keyboard.Modifiers}");
+                // Only log important key combinations, ignore modifier keys alone
+                if (e.Key != Key.LeftCtrl && e.Key != Key.RightCtrl && e.Key != Key.LeftAlt && e.Key != Key.RightAlt && 
+                    e.Key != Key.LeftShift && e.Key != Key.RightShift && e.Key != Key.LWin && e.Key != Key.RWin)
+                {
+                    DebugLog($"PreviewKeyDown - Key: {e.Key}, Modifiers: {Keyboard.Modifiers}");
+                }
                 
                 if (e.Key == Key.C && Keyboard.Modifiers == ModifierKeys.Control)
                 {
-                    DebugLog($"Ctrl+C detected in PreviewKeyDown - Selected cells: {dataGrid.SelectedCells.Count}");
+                    DebugLog($"Ctrl+C detected - Selected cells: {ScheduleDataGrid.SelectedCells.Count}");
                     // Ctrl+C: Copy selected cells
                     CopyCells();
                     e.Handled = true;
                 }
                 else if (e.Key == Key.V && Keyboard.Modifiers == ModifierKeys.Control)
                 {
-                    DebugLog($"Ctrl+V detected in PreviewKeyDown - Current cell: {dataGrid.CurrentCell.Column?.Header}");
+                    DebugLog($"Ctrl+V detected - Current cell: {ScheduleDataGrid.CurrentCell.Column?.Header}");
                     // Ctrl+V: Paste cells
                     PasteCells();
                     e.Handled = true;
@@ -277,16 +349,16 @@ namespace RevitScheduleEditor
                     e.Handled = true;
                     
                     // Move to next row, same column
-                    var currentCell = dataGrid.CurrentCell;
-                    var currentRowIndex = dataGrid.Items.IndexOf(currentCell.Item);
+                    var currentCell = ScheduleDataGrid.CurrentCell;
+                    var currentRowIndex = ScheduleDataGrid.Items.IndexOf(currentCell.Item);
                     var currentColumnIndex = currentCell.Column.DisplayIndex;
                     
-                    if (currentRowIndex < dataGrid.Items.Count - 1)
+                    if (currentRowIndex < ScheduleDataGrid.Items.Count - 1)
                     {
-                        dataGrid.CurrentCell = new DataGridCellInfo(
-                            dataGrid.Items[currentRowIndex + 1],
-                            dataGrid.Columns[currentColumnIndex]);
-                        dataGrid.BeginEdit();
+                        ScheduleDataGrid.CurrentCell = new DataGridCellInfo(
+                            ScheduleDataGrid.Items[currentRowIndex + 1],
+                            ScheduleDataGrid.Columns[currentColumnIndex]);
+                        ScheduleDataGrid.BeginEdit();
                     }
                 }
                 else if (e.Key == Key.Tab)
@@ -294,66 +366,66 @@ namespace RevitScheduleEditor
                     e.Handled = true;
                     
                     // Move to next column, same row (or next row if at end)
-                    var currentCell = dataGrid.CurrentCell;
-                    var currentRowIndex = dataGrid.Items.IndexOf(currentCell.Item);
+                    var currentCell = ScheduleDataGrid.CurrentCell;
+                    var currentRowIndex = ScheduleDataGrid.Items.IndexOf(currentCell.Item);
                     var currentColumnIndex = currentCell.Column.DisplayIndex;
                     
-                    if (currentColumnIndex < dataGrid.Columns.Count - 1)
+                    if (currentColumnIndex < ScheduleDataGrid.Columns.Count - 1)
                     {
-                        dataGrid.CurrentCell = new DataGridCellInfo(
+                        ScheduleDataGrid.CurrentCell = new DataGridCellInfo(
                             currentCell.Item,
-                            dataGrid.Columns[currentColumnIndex + 1]);
+                            ScheduleDataGrid.Columns[currentColumnIndex + 1]);
                     }
-                    else if (currentRowIndex < dataGrid.Items.Count - 1)
+                    else if (currentRowIndex < ScheduleDataGrid.Items.Count - 1)
                     {
-                        dataGrid.CurrentCell = new DataGridCellInfo(
-                            dataGrid.Items[currentRowIndex + 1],
-                            dataGrid.Columns[0]);
+                        ScheduleDataGrid.CurrentCell = new DataGridCellInfo(
+                            ScheduleDataGrid.Items[currentRowIndex + 1],
+                            ScheduleDataGrid.Columns[0]);
                     }
-                    dataGrid.BeginEdit();
+                    ScheduleDataGrid.BeginEdit();
                 }
                 else if (e.Key == Key.F2)
                 {
                     // F2 to edit current cell (like Excel)
-                    dataGrid.BeginEdit();
+                    ScheduleDataGrid.BeginEdit();
                     e.Handled = true;
                 }
                 else if (e.Key == Key.Escape)
                 {
                     // Escape to cancel edit
-                    dataGrid.CancelEdit();
+                    ScheduleDataGrid.CancelEdit();
                     e.Handled = true;
                 }
             };
 
             // Handle direct typing to start editing (like Excel)
-            dataGrid.PreviewTextInput += (sender, e) =>
+            ScheduleDataGrid.PreviewTextInput += (sender, e) =>
             {
-                if (!dataGrid.IsReadOnly && dataGrid.CurrentCell.IsValid)
+                if (!ScheduleDataGrid.IsReadOnly && ScheduleDataGrid.CurrentCell.IsValid)
                 {
-                    dataGrid.BeginEdit();
+                    ScheduleDataGrid.BeginEdit();
                 }
             };
             
             // Add column header click handler for selecting entire column
-            dataGrid.PreviewMouseLeftButtonDown += DataGrid_PreviewMouseLeftButtonDown;
+            ScheduleDataGrid.PreviewMouseLeftButtonDown += DataGrid_PreviewMouseLeftButtonDown;
             
             // Add Ctrl+C handler for copy functionality
-            dataGrid.PreviewKeyDown += (sender, e) =>
+            ScheduleDataGrid.PreviewKeyDown += (sender, e) =>
             {
                 if (e.Key == Key.C && Keyboard.Modifiers == ModifierKeys.Control)
                 {
-                    DebugLog("Ctrl+C pressed - Using native DataGrid copy");
+                    DebugLog("Ctrl+C pressed - Using native ScheduleDataGrid copy");
                     try
                     {
-                        // Let DataGrid handle the copy with its built-in functionality
-                        ApplicationCommands.Copy.Execute(null, dataGrid);
+                        // Let ScheduleDataGrid handle the copy with its built-in functionality
+                        ApplicationCommands.Copy.Execute(null, ScheduleDataGrid);
                         e.Handled = true;
-                        DebugLog("Native DataGrid copy executed successfully");
+                        DebugLog("Native ScheduleDataGrid copy executed successfully");
                     }
                     catch (Exception ex)
                     {
-                        DebugLog($"Native DataGrid copy failed: {ex.Message}");
+                        DebugLog($"Native ScheduleDataGrid copy failed: {ex.Message}");
                         // Fallback to custom copy
                         CopyCells();
                         e.Handled = true;
@@ -365,11 +437,11 @@ namespace RevitScheduleEditor
         // Event handler for column header click - select entire column
         private void DataGrid_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
-            var dataGrid = sender as DataGrid;
-            if (dataGrid == null) return;
+            var ScheduleDataGrid = sender as ScheduleDataGrid;
+            if (ScheduleDataGrid == null) return;
             
             // Check if click is on a column header
-            var hitTest = VisualTreeHelper.HitTest(dataGrid, e.GetPosition(dataGrid));
+            var hitTest = VisualTreeHelper.HitTest(ScheduleDataGrid, e.GetPosition(ScheduleDataGrid));
             if (hitTest?.VisualHit == null) return;
             
             // Find if we clicked on a DataGridColumnHeader (but not on the filter button)
@@ -389,19 +461,19 @@ namespace RevitScheduleEditor
             try
             {
                 // Clear current selection first
-                dataGrid.SelectedCells.Clear();
+                ScheduleDataGrid.SelectedCells.Clear();
                 
                 // Select all cells in this column
-                foreach (var item in dataGrid.Items)
+                foreach (var item in ScheduleDataGrid.Items)
                 {
                     var cellInfo = new DataGridCellInfo(item, columnHeader.Column);
-                    dataGrid.SelectedCells.Add(cellInfo);
+                    ScheduleDataGrid.SelectedCells.Add(cellInfo);
                 }
                 
-                DebugLog($"DataGrid_PreviewMouseLeftButtonDown - Selected {dataGrid.SelectedCells.Count} cells in column {columnHeader.Column.Header}");
+                DebugLog($"DataGrid_PreviewMouseLeftButtonDown - Selected {ScheduleDataGrid.SelectedCells.Count} cells in column {columnHeader.Column.Header}");
                 
                 // Auto-copy column values to clipboard
-                CopyColumnToClipboard(dataGrid, columnHeader.Column);
+                CopyColumnToClipboard(ScheduleDataGrid, columnHeader.Column);
                 
                 // Prevent further processing to avoid other click behaviors
                 e.Handled = true;
@@ -413,7 +485,7 @@ namespace RevitScheduleEditor
         }
 
         // Copy column values to clipboard
-        private void CopyColumnToClipboard(DataGrid dataGrid, DataGridColumn column)
+        private void CopyColumnToClipboard(ScheduleDataGrid ScheduleDataGrid, DataGridColumn column)
         {
             try
             {
@@ -435,7 +507,7 @@ namespace RevitScheduleEditor
                 DebugLog($"CopyColumnToClipboard - Extracting values for property: {propertyPath}");
                 
                 // Extract values from each row
-                foreach (var item in dataGrid.Items)
+                foreach (var item in ScheduleDataGrid.Items)
                 {
                     if (item == null) continue;
                     
@@ -476,18 +548,18 @@ namespace RevitScheduleEditor
         // Context menu handler for copying column
         private void CopyColumn_Click(object sender, RoutedEventArgs e)
         {
-            var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
-            if (dataGrid?.SelectedCells == null || dataGrid.SelectedCells.Count == 0)
+            var ScheduleDataGrid = this.FindName("ScheduleDataGrid") as ScheduleDataGrid;
+            if (ScheduleDataGrid?.SelectedCells == null || ScheduleDataGrid.SelectedCells.Count == 0)
             {
                 DebugLog("CopyColumn_Click - No cells selected");
                 return;
             }
 
             // Get the column from the first selected cell
-            var firstCell = dataGrid.SelectedCells[0];
+            var firstCell = ScheduleDataGrid.SelectedCells[0];
             if (firstCell.Column != null)
             {
-                CopyColumnToClipboard(dataGrid, firstCell.Column);
+                CopyColumnToClipboard(ScheduleDataGrid, firstCell.Column);
             }
             else
             {
@@ -497,10 +569,10 @@ namespace RevitScheduleEditor
 
         private void GenerateDataGridColumns()
         {
-            var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
-            if (dataGrid == null) return;
+            var ScheduleDataGrid = this.FindName("ScheduleDataGrid") as ScheduleDataGrid;
+            if (ScheduleDataGrid == null) return;
             
-            dataGrid.Columns.Clear();
+            ScheduleDataGrid.Columns.Clear();
             if (_viewModel.SelectedSchedule == null) return;
 
             var visibleFields = _viewModel.SelectedSchedule.Definition.GetFieldOrder()
@@ -521,7 +593,7 @@ namespace RevitScheduleEditor
                 CellStyle = excelCellStyle,
                 HeaderStyle = filterHeaderStyle
             };
-            dataGrid.Columns.Add(elementIdColumn);
+            ScheduleDataGrid.Columns.Add(elementIdColumn);
 
             // Add regular schedule fields
             foreach (var field in visibleFields)
@@ -534,11 +606,11 @@ namespace RevitScheduleEditor
                     CellStyle = excelCellStyle,  // Apply Excel-like style with fill handle
                     HeaderStyle = filterHeaderStyle  // Apply integrated filter header style
                 };
-                dataGrid.Columns.Add(column);
+                ScheduleDataGrid.Columns.Add(column);
             }
             
             // Setup fill handle interactions
-            SetupFillHandleInteractions(dataGrid);
+            SetupFillHandleInteractions(ScheduleDataGrid);
             
             // Update filter status display when columns change
             UpdateFilterStatusDisplay();
@@ -550,13 +622,13 @@ namespace RevitScheduleEditor
             DebugLog("FilterButton_Click - Started");
             
             // Cancel any active edit operations first
-            var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
-            if (dataGrid != null)
+            var ScheduleDataGrid = this.FindName("ScheduleDataGrid") as ScheduleDataGrid;
+            if (ScheduleDataGrid != null)
             {
                 try
                 {
-                    dataGrid.CancelEdit();
-                    dataGrid.CommitEdit();
+                    ScheduleDataGrid.CancelEdit();
+                    ScheduleDataGrid.CommitEdit();
                 }
                 catch
                 {
@@ -596,9 +668,9 @@ namespace RevitScheduleEditor
                 return;
             }
 
-            // Get the DataGrid to access currently visible data (after existing filters)
-            var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
-            var currentData = dataGrid?.ItemsSource as IEnumerable<ScheduleRow>;
+            // Get the ScheduleDataGrid to access currently visible data (after existing filters)
+            var ScheduleDataGrid = this.FindName("ScheduleDataGrid") as ScheduleDataGrid;
+            var currentData = ScheduleDataGrid?.ItemsSource as IEnumerable<ScheduleRow>;
             
             // If no current data source (no filters applied yet), use all data
             if (currentData == null)
@@ -733,11 +805,11 @@ namespace RevitScheduleEditor
             try
             {
                 // Cancel any current edit operations before applying filter
-                var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
-                if (dataGrid != null)
+                var ScheduleDataGrid = this.FindName("ScheduleDataGrid") as ScheduleDataGrid;
+                if (ScheduleDataGrid != null)
                 {
-                    dataGrid.CancelEdit();
-                    dataGrid.CommitEdit();
+                    ScheduleDataGrid.CancelEdit();
+                    ScheduleDataGrid.CommitEdit();
                 }
 
                 // Get selected values (skip "Select All" checkbox and separator)
@@ -794,13 +866,13 @@ namespace RevitScheduleEditor
 
         private void UpdateColumnHeaderAppearance(string columnName, bool hasFilter)
         {
-            var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
-            if (dataGrid == null) return;
+            var ScheduleDataGrid = this.FindName("ScheduleDataGrid") as ScheduleDataGrid;
+            if (ScheduleDataGrid == null) return;
 
             // Force the visual tree to be generated
-            dataGrid.UpdateLayout();
+            ScheduleDataGrid.UpdateLayout();
 
-            foreach (DataGridColumn column in dataGrid.Columns)
+            foreach (DataGridColumn column in ScheduleDataGrid.Columns)
             {
                 if (column.Header.ToString() == columnName)
                 {
@@ -849,10 +921,10 @@ namespace RevitScheduleEditor
         // Update all column headers to reflect current filter status
         private void UpdateAllColumnHeadersAppearance()
         {
-            var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
-            if (dataGrid == null) return;
+            var ScheduleDataGrid = this.FindName("ScheduleDataGrid") as ScheduleDataGrid;
+            if (ScheduleDataGrid == null) return;
 
-            foreach (DataGridColumn column in dataGrid.Columns)
+            foreach (DataGridColumn column in ScheduleDataGrid.Columns)
             {
                 string columnName = column.Header?.ToString();
                 if (!string.IsNullOrEmpty(columnName))
@@ -863,10 +935,10 @@ namespace RevitScheduleEditor
             }
         }
 
-        private DataGridColumnHeader GetColumnHeader(DataGrid dataGrid, DataGridColumn column)
+        private DataGridColumnHeader GetColumnHeader(ScheduleDataGrid ScheduleDataGrid, DataGridColumn column)
         {
             // Get the column header presenter
-            var presenter = GetVisualChild<DataGridColumnHeadersPresenter>(dataGrid);
+            var presenter = GetVisualChild<DataGridColumnHeadersPresenter>(ScheduleDataGrid);
             if (presenter != null)
             {
                 for (int i = 0; i < presenter.Items.Count; i++)
@@ -943,14 +1015,14 @@ namespace RevitScheduleEditor
             return false;
         }
 
-        private void SetupFillHandleInteractions(DataGrid dataGrid)
+        private void SetupFillHandleInteractions(ScheduleDataGrid ScheduleDataGrid)
         {
             // Variables để track fill handle dragging
             bool isDragging = false;
             DataGridCell startCell = null;
             Point startPoint;
 
-            dataGrid.PreviewMouseLeftButtonDown += (sender, e) =>
+            ScheduleDataGrid.PreviewMouseLeftButtonDown += (sender, e) =>
             {
                 // Check if mouse is over a fill handle
                 var element = e.OriginalSource as FrameworkElement;
@@ -958,47 +1030,47 @@ namespace RevitScheduleEditor
                 {
                     isDragging = true;
                     startCell = FindParent<DataGridCell>(element);
-                    startPoint = e.GetPosition(dataGrid);
-                    dataGrid.CaptureMouse();
+                    startPoint = e.GetPosition(ScheduleDataGrid);
+                    ScheduleDataGrid.CaptureMouse();
                     e.Handled = true;
                 }
             };
 
-            dataGrid.PreviewMouseMove += (sender, e) =>
+            ScheduleDataGrid.PreviewMouseMove += (sender, e) =>
             {
                 if (isDragging && startCell != null)
                 {
-                    var currentPosition = e.GetPosition(dataGrid);
+                    var currentPosition = e.GetPosition(ScheduleDataGrid);
                     
                     // Visual feedback during drag
-                    var endCell = GetCellFromPoint(dataGrid, currentPosition);
+                    var endCell = GetCellFromPoint(ScheduleDataGrid, currentPosition);
                     if (endCell != null)
                     {
                         // Check if Ctrl is pressed for different visual feedback
                         bool isCtrlPressed = Keyboard.Modifiers.HasFlag(ModifierKeys.Control);
                         
                         // Highlight selection range with different colors based on mode
-                        HighlightFillRange(dataGrid, startCell, endCell, isCtrlPressed);
+                        HighlightFillRange(ScheduleDataGrid, startCell, endCell, isCtrlPressed);
                         
                         // Update cursor based on mode
                         if (isCtrlPressed)
                         {
-                            dataGrid.Cursor = Cursors.Cross; // Series fill cursor
+                            ScheduleDataGrid.Cursor = Cursors.Cross; // Series fill cursor
                         }
                         else
                         {
-                            dataGrid.Cursor = Cursors.SizeNWSE; // Normal fill cursor
+                            ScheduleDataGrid.Cursor = Cursors.SizeNWSE; // Normal fill cursor
                         }
                     }
                 }
             };
 
-            dataGrid.PreviewMouseLeftButtonUp += (sender, e) =>
+            ScheduleDataGrid.PreviewMouseLeftButtonUp += (sender, e) =>
             {
                 if (isDragging && startCell != null)
                 {
-                    var endPosition = e.GetPosition(dataGrid);
-                    var endCell = GetCellFromPoint(dataGrid, endPosition);
+                    var endPosition = e.GetPosition(ScheduleDataGrid);
+                    var endCell = GetCellFromPoint(ScheduleDataGrid, endPosition);
                     
                     if (endCell != null && endCell != startCell)
                     {
@@ -1008,9 +1080,9 @@ namespace RevitScheduleEditor
                     
                     isDragging = false;
                     startCell = null;
-                    dataGrid.ReleaseMouseCapture();
-                    dataGrid.Cursor = Cursors.Arrow; // Reset cursor
-                    ClearFillHighlight(dataGrid);
+                    ScheduleDataGrid.ReleaseMouseCapture();
+                    ScheduleDataGrid.Cursor = Cursors.Arrow; // Reset cursor
+                    ClearFillHighlight(ScheduleDataGrid);
                 }
             };
         }
@@ -1026,9 +1098,9 @@ namespace RevitScheduleEditor
             return null;
         }
 
-        private DataGridCell GetCellFromPoint(DataGrid dataGrid, Point point)
+        private DataGridCell GetCellFromPoint(ScheduleDataGrid ScheduleDataGrid, Point point)
         {
-            var hitTest = VisualTreeHelper.HitTest(dataGrid, point);
+            var hitTest = VisualTreeHelper.HitTest(ScheduleDataGrid, point);
             if (hitTest?.VisualHit != null)
             {
                 return FindParent<DataGridCell>(hitTest.VisualHit);
@@ -1036,15 +1108,15 @@ namespace RevitScheduleEditor
             return null;
         }
 
-        private void HighlightFillRange(DataGrid dataGrid, DataGridCell startCell, DataGridCell endCell, bool isCtrlPressed = false)
+        private void HighlightFillRange(ScheduleDataGrid ScheduleDataGrid, DataGridCell startCell, DataGridCell endCell, bool isCtrlPressed = false)
         {
             // Clear previous highlight
-            ClearFillHighlight(dataGrid);
+            ClearFillHighlight(ScheduleDataGrid);
             
             // Get start and end positions
-            var startRow = dataGrid.Items.IndexOf(startCell.DataContext);
+            var startRow = ScheduleDataGrid.Items.IndexOf(startCell.DataContext);
             var startCol = startCell.Column.DisplayIndex;
-            var endRow = dataGrid.Items.IndexOf(endCell.DataContext);
+            var endRow = ScheduleDataGrid.Items.IndexOf(endCell.DataContext);
             var endCol = endCell.Column.DisplayIndex;
             
             // Ensure proper order
@@ -1063,7 +1135,7 @@ namespace RevitScheduleEditor
             {
                 for (int col = minCol; col <= maxCol; col++)
                 {
-                    var cell = GetCell(dataGrid, row, col);
+                    var cell = GetCell(ScheduleDataGrid, row, col);
                     if (cell != null)
                     {
                         cell.Background = new SolidColorBrush(highlightColor);
@@ -1072,13 +1144,13 @@ namespace RevitScheduleEditor
             }
         }
 
-        private void ClearFillHighlight(DataGrid dataGrid)
+        private void ClearFillHighlight(ScheduleDataGrid ScheduleDataGrid)
         {
-            foreach (var item in dataGrid.Items)
+            foreach (var item in ScheduleDataGrid.Items)
             {
-                for (int col = 0; col < dataGrid.Columns.Count; col++)
+                for (int col = 0; col < ScheduleDataGrid.Columns.Count; col++)
                 {
-                    var cell = GetCell(dataGrid, dataGrid.Items.IndexOf(item), col);
+                    var cell = GetCell(ScheduleDataGrid, ScheduleDataGrid.Items.IndexOf(item), col);
                     if (cell != null && !cell.IsSelected)
                     {
                         cell.Background = Brushes.Transparent;
@@ -1087,12 +1159,12 @@ namespace RevitScheduleEditor
             }
         }
 
-        private DataGridCell GetCell(DataGrid dataGrid, int row, int column)
+        private DataGridCell GetCell(ScheduleDataGrid ScheduleDataGrid, int row, int column)
         {
-            if (row >= dataGrid.Items.Count || column >= dataGrid.Columns.Count)
+            if (row >= ScheduleDataGrid.Items.Count || column >= ScheduleDataGrid.Columns.Count)
                 return null;
                 
-            var rowContainer = dataGrid.ItemContainerGenerator.ContainerFromIndex(row) as DataGridRow;
+            var rowContainer = ScheduleDataGrid.ItemContainerGenerator.ContainerFromIndex(row) as DataGridRow;
             if (rowContainer == null) return null;
             
             var presenter = FindVisualChild<DataGridCellsPresenter>(rowContainer);
@@ -1121,10 +1193,10 @@ namespace RevitScheduleEditor
             // Save state for undo
             _viewModel.SaveStateForUndo();
             
-            var dataGrid = FindParent<DataGrid>(startCell);
-            var startRow = dataGrid.Items.IndexOf(startCell.DataContext);
+            var ScheduleDataGrid = FindParent<ScheduleDataGrid>(startCell);
+            var startRow = ScheduleDataGrid.Items.IndexOf(startCell.DataContext);
             var startCol = startCell.Column.DisplayIndex;
-            var endRow = dataGrid.Items.IndexOf(endCell.DataContext);
+            var endRow = ScheduleDataGrid.Items.IndexOf(endCell.DataContext);
             var endCol = endCell.Column.DisplayIndex;
             
             // Get start value
@@ -1146,15 +1218,15 @@ namespace RevitScheduleEditor
                 if (isCtrlPressed)
                 {
                     // Fill Series horizontally với Ctrl
-                    PerformHorizontalFillSeries(dataGrid, startRow, minCol, maxCol, startValue);
+                    PerformHorizontalFillSeries(ScheduleDataGrid, startRow, minCol, maxCol, startValue);
                 }
                 else
                 {
                     // Copy value horizontally (original behavior)
                     for (int col = minCol + 1; col <= maxCol; col++)
                     {
-                        var targetColumnName = dataGrid.Columns[col].Header.ToString();
-                        var targetRowData = dataGrid.Items[startRow] as ScheduleRow;
+                        var targetColumnName = ScheduleDataGrid.Columns[col].Header.ToString();
+                        var targetRowData = ScheduleDataGrid.Items[startRow] as ScheduleRow;
                         if (targetRowData != null)
                         {
                             targetRowData[targetColumnName] = startValue;  // Use indexer instead of Values
@@ -1170,7 +1242,7 @@ namespace RevitScheduleEditor
                 if (isCtrlPressed)
                 {
                     // Fill Series vertically với Ctrl
-                    PerformVerticalFillSeries(dataGrid, minRow, maxRow, columnName, startValue);
+                    PerformVerticalFillSeries(ScheduleDataGrid, minRow, maxRow, columnName, startValue);
                 }
                 else
                 {
@@ -1178,7 +1250,7 @@ namespace RevitScheduleEditor
                     var values = new List<string>();
                     for (int row = minRow; row <= Math.Min(minRow + 2, maxRow); row++)
                     {
-                        var rowData = dataGrid.Items[row] as ScheduleRow;
+                        var rowData = ScheduleDataGrid.Items[row] as ScheduleRow;
                         if (rowData?.Values.ContainsKey(columnName) == true)
                         {
                             values.Add(rowData.Values[columnName]);
@@ -1188,7 +1260,7 @@ namespace RevitScheduleEditor
                     // Perform smart fill with pattern detection
                     for (int row = minRow + 1; row <= maxRow; row++)
                     {
-                        var targetRowData = dataGrid.Items[row] as ScheduleRow;
+                        var targetRowData = ScheduleDataGrid.Items[row] as ScheduleRow;
                         if (targetRowData != null)
                         {
                             var fillValue = GetSmartFillValue(values, row - minRow);
@@ -1199,7 +1271,7 @@ namespace RevitScheduleEditor
             }
             
             // Refresh the view
-            dataGrid.Items.Refresh();
+            ScheduleDataGrid.Items.Refresh();
             
             DebugLog($"PerformFillHandleAutofill completed - Mode: {(isCtrlPressed ? "Fill Series" : "Smart Fill")}");
         }
@@ -1207,7 +1279,7 @@ namespace RevitScheduleEditor
         /// <summary>
         /// Thực hiện Fill Series theo chiều ngang (horizontal) khi giữ Ctrl
         /// </summary>
-        private void PerformHorizontalFillSeries(DataGrid dataGrid, int row, int minCol, int maxCol, string startValue)
+        private void PerformHorizontalFillSeries(ScheduleDataGrid ScheduleDataGrid, int row, int minCol, int maxCol, string startValue)
         {
             DebugLog($"PerformHorizontalFillSeries - Row: {row}, Columns: {minCol} to {maxCol}, Start value: '{startValue}'");
             
@@ -1218,8 +1290,8 @@ namespace RevitScheduleEditor
                 DebugLog($"Horizontal Fill Series - Pure number detected: {numericStart}");
                 for (int col = minCol + 1; col <= maxCol; col++)
                 {
-                    var targetColumnName = dataGrid.Columns[col].Header.ToString();
-                    var targetRowData = dataGrid.Items[row] as ScheduleRow;
+                    var targetColumnName = ScheduleDataGrid.Columns[col].Header.ToString();
+                    var targetRowData = ScheduleDataGrid.Items[row] as ScheduleRow;
                     if (targetRowData != null)
                     {
                         double newValue = numericStart + (col - minCol);
@@ -1239,8 +1311,8 @@ namespace RevitScheduleEditor
                 
                 for (int col = minCol + 1; col <= maxCol; col++)
                 {
-                    var targetColumnName = dataGrid.Columns[col].Header.ToString();
-                    var targetRowData = dataGrid.Items[row] as ScheduleRow;
+                    var targetColumnName = ScheduleDataGrid.Columns[col].Header.ToString();
+                    var targetRowData = ScheduleDataGrid.Items[row] as ScheduleRow;
                     if (targetRowData != null)
                     {
                         int newNumber = numberPart + (col - minCol);
@@ -1256,8 +1328,8 @@ namespace RevitScheduleEditor
                 DebugLog($"Horizontal Fill Series - Non-numeric text, creating numbered series");
                 for (int col = minCol + 1; col <= maxCol; col++)
                 {
-                    var targetColumnName = dataGrid.Columns[col].Header.ToString();
-                    var targetRowData = dataGrid.Items[row] as ScheduleRow;
+                    var targetColumnName = ScheduleDataGrid.Columns[col].Header.ToString();
+                    var targetRowData = ScheduleDataGrid.Items[row] as ScheduleRow;
                     if (targetRowData != null)
                     {
                         string newValue = $"{startValue} {col - minCol + 1}";
@@ -1271,7 +1343,7 @@ namespace RevitScheduleEditor
         /// <summary>
         /// Thực hiện Fill Series theo chiều dọc (vertical) khi giữ Ctrl
         /// </summary>
-        private void PerformVerticalFillSeries(DataGrid dataGrid, int minRow, int maxRow, string columnName, string startValue)
+        private void PerformVerticalFillSeries(ScheduleDataGrid ScheduleDataGrid, int minRow, int maxRow, string columnName, string startValue)
         {
             DebugLog($"PerformVerticalFillSeries - Rows: {minRow} to {maxRow}, Column: '{columnName}', Start value: '{startValue}'");
             
@@ -1282,7 +1354,7 @@ namespace RevitScheduleEditor
                 DebugLog($"Vertical Fill Series - Pure number detected: {numericStart}");
                 for (int row = minRow + 1; row <= maxRow; row++)
                 {
-                    var targetRowData = dataGrid.Items[row] as ScheduleRow;
+                    var targetRowData = ScheduleDataGrid.Items[row] as ScheduleRow;
                     if (targetRowData != null)
                     {
                         double newValue = numericStart + (row - minRow);
@@ -1302,7 +1374,7 @@ namespace RevitScheduleEditor
                 
                 for (int row = minRow + 1; row <= maxRow; row++)
                 {
-                    var targetRowData = dataGrid.Items[row] as ScheduleRow;
+                    var targetRowData = ScheduleDataGrid.Items[row] as ScheduleRow;
                     if (targetRowData != null)
                     {
                         int newNumber = numberPart + (row - minRow);
@@ -1318,7 +1390,7 @@ namespace RevitScheduleEditor
                 DebugLog($"Vertical Fill Series - Non-numeric text, creating numbered series");
                 for (int row = minRow + 1; row <= maxRow; row++)
                 {
-                    var targetRowData = dataGrid.Items[row] as ScheduleRow;
+                    var targetRowData = ScheduleDataGrid.Items[row] as ScheduleRow;
                     if (targetRowData != null)
                     {
                         string newValue = $"{startValue} {row - minRow + 1}";
@@ -1400,26 +1472,26 @@ namespace RevitScheduleEditor
 
         private void SetupEnhancedAutofill()
         {
-            var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
-            if (dataGrid == null) return;
+            var ScheduleDataGrid = this.FindName("ScheduleDataGrid") as ScheduleDataGrid;
+            if (ScheduleDataGrid == null) return;
 
             // Double-click behavior: Edit mode for single cell, autofill for multiple cells
-            dataGrid.MouseDoubleClick += (sender, e) =>
+            ScheduleDataGrid.MouseDoubleClick += (sender, e) =>
             {
-                DebugLog($"MouseDoubleClick - SelectedCells count: {dataGrid.SelectedCells.Count}");
+                DebugLog($"MouseDoubleClick - SelectedCells count: {ScheduleDataGrid.SelectedCells.Count}");
                 
-                if (dataGrid.SelectedCells.Count > 1)
+                if (ScheduleDataGrid.SelectedCells.Count > 1)
                 {
                     DebugLog("MouseDoubleClick - Multiple cells selected, triggering autofill");
-                    _viewModel.AutofillCommand.Execute(dataGrid.SelectedCells);
+                    _viewModel.AutofillCommand.Execute(ScheduleDataGrid.SelectedCells);
                 }
-                else if (dataGrid.SelectedCells.Count == 1)
+                else if (ScheduleDataGrid.SelectedCells.Count == 1)
                 {
                     DebugLog("MouseDoubleClick - Single cell selected, entering edit mode");
                     // For single cell, enter edit mode
                     try
                     {
-                        dataGrid.BeginEdit();
+                        ScheduleDataGrid.BeginEdit();
                         DebugLog("MouseDoubleClick - BeginEdit() called successfully");
                     }
                     catch (Exception ex)
@@ -1433,30 +1505,35 @@ namespace RevitScheduleEditor
                 }
             };
 
-            dataGrid.KeyDown += (sender, e) =>
+            ScheduleDataGrid.KeyDown += (sender, e) =>
             {
-                DebugLog($"KeyDown - Key: {e.Key}, Modifiers: {Keyboard.Modifiers}");
+                // Only log functional key combinations, ignore modifier keys alone
+                if (e.Key != Key.LeftCtrl && e.Key != Key.RightCtrl && e.Key != Key.LeftAlt && e.Key != Key.RightAlt && 
+                    e.Key != Key.LeftShift && e.Key != Key.RightShift)
+                {
+                    DebugLog($"KeyDown - Key: {e.Key}, Modifiers: {Keyboard.Modifiers}");
+                }
                 
                 if (e.Key == Key.Enter && Keyboard.Modifiers == ModifierKeys.Control)
                 {
-                    if (dataGrid.SelectedCells.Count > 1)
+                    if (ScheduleDataGrid.SelectedCells.Count > 1)
                     {
-                        _viewModel.AutofillCommand.Execute(dataGrid.SelectedCells);
+                        _viewModel.AutofillCommand.Execute(ScheduleDataGrid.SelectedCells);
                         e.Handled = true;
                     }
                 }
                 else if (e.Key == Key.Enter && Keyboard.Modifiers == ModifierKeys.Shift)
                 {
                     // Smart autofill with pattern detection
-                    ExecuteSmartAutofill((System.Collections.IList)dataGrid.SelectedCells);
+                    ExecuteSmartAutofill((System.Collections.IList)ScheduleDataGrid.SelectedCells);
                     e.Handled = true;
                 }
                 else if (e.Key == Key.Enter && Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift))
                 {
                     // Fill Series với Ctrl+Shift+Enter
-                    if (dataGrid.SelectedCells.Count > 1)
+                    if (ScheduleDataGrid.SelectedCells.Count > 1)
                     {
-                        ExecuteFillSeries((System.Collections.IList)dataGrid.SelectedCells);
+                        ExecuteFillSeries((System.Collections.IList)ScheduleDataGrid.SelectedCells);
                         e.Handled = true;
                     }
                 }
@@ -1505,16 +1582,16 @@ namespace RevitScheduleEditor
                 DebugLog($"ExecuteFillSeries - Column '{columnName}', Start value: '{startValue}'");
 
                 // Apply Fill Series to all cells in this column
-                var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
+                var ScheduleDataGrid = this.FindName("ScheduleDataGrid") as ScheduleDataGrid;
                 var startRowIndex = _viewModel.ScheduleData.IndexOf(firstRow);
                 var endRowIndex = _viewModel.ScheduleData.IndexOf(cellsInColumn.Last().Item as ScheduleRow);
                 
                 // Use the PerformVerticalFillSeries method
-                PerformVerticalFillSeries(dataGrid, startRowIndex, endRowIndex, columnName, startValue);
+                PerformVerticalFillSeries(ScheduleDataGrid, startRowIndex, endRowIndex, columnName, startValue);
             }
             
             // Refresh the view
-            var dataGridControl = this.FindName("ScheduleDataGrid") as DataGrid;
+            var dataGridControl = this.FindName("ScheduleDataGrid") as ScheduleDataGrid;
             dataGridControl?.Items.Refresh();
             
             DebugLog("ExecuteFillSeries completed");
@@ -1525,11 +1602,11 @@ namespace RevitScheduleEditor
         /// </summary>
         private void FillSeries_Click(object sender, RoutedEventArgs e)
         {
-            var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
-            if (dataGrid?.SelectedCells != null && dataGrid.SelectedCells.Count > 1)
+            var ScheduleDataGrid = this.FindName("ScheduleDataGrid") as ScheduleDataGrid;
+            if (ScheduleDataGrid?.SelectedCells != null && ScheduleDataGrid.SelectedCells.Count > 1)
             {
-                DebugLog($"FillSeries_Click - Executing Fill Series for {dataGrid.SelectedCells.Count} cells");
-                ExecuteFillSeries((System.Collections.IList)dataGrid.SelectedCells);
+                DebugLog($"FillSeries_Click - Executing Fill Series for {ScheduleDataGrid.SelectedCells.Count} cells");
+                ExecuteFillSeries((System.Collections.IList)ScheduleDataGrid.SelectedCells);
             }
             else
             {
@@ -1613,19 +1690,19 @@ namespace RevitScheduleEditor
         {
             try
             {
-                var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
-                if (dataGrid == null)
+                var ScheduleDataGrid = this.FindName("ScheduleDataGrid") as ScheduleDataGrid;
+                if (ScheduleDataGrid == null)
                 {
-                    DebugLog("GetRowAtMousePosition - DataGrid is null");
+                    DebugLog("GetRowAtMousePosition - ScheduleDataGrid is null");
                     return null;
                 }
 
-                // Lấy vị trí chuột hiện tại relative to DataGrid
-                var mousePosition = Mouse.GetPosition(dataGrid);
+                // Lấy vị trí chuột hiện tại relative to ScheduleDataGrid
+                var mousePosition = Mouse.GetPosition(ScheduleDataGrid);
                 DebugLog($"GetRowAtMousePosition - Mouse position: {mousePosition.X}, {mousePosition.Y}");
 
                 // Tìm element tại vị trí chuột
-                var hitTestResult = VisualTreeHelper.HitTest(dataGrid, mousePosition);
+                var hitTestResult = VisualTreeHelper.HitTest(ScheduleDataGrid, mousePosition);
                 if (hitTestResult?.VisualHit == null)
                 {
                     DebugLog("GetRowAtMousePosition - No visual hit found");
@@ -1770,10 +1847,10 @@ namespace RevitScheduleEditor
         // Method to update column header visual state for filters
         private void UpdateColumnHeaderFilterStatus(string columnName, bool hasFilter)
         {
-            var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
-            if (dataGrid == null) return;
+            var ScheduleDataGrid = this.FindName("ScheduleDataGrid") as ScheduleDataGrid;
+            if (ScheduleDataGrid == null) return;
 
-            var column = dataGrid.Columns.FirstOrDefault(c => c.Header?.ToString() == columnName);
+            var column = ScheduleDataGrid.Columns.FirstOrDefault(c => c.Header?.ToString() == columnName);
             if (column == null) return;
 
             // Update the column header's Tag property to indicate filter status
@@ -1797,10 +1874,10 @@ namespace RevitScheduleEditor
 
             try
             {
-                var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
-                if (dataGrid == null) 
+                var ScheduleDataGrid = this.FindName("ScheduleDataGrid") as ScheduleDataGrid;
+                if (ScheduleDataGrid == null) 
                 {
-                    DebugLog("ApplyFilters - DataGrid not found, returning");
+                    DebugLog("ApplyFilters - ScheduleDataGrid not found, returning");
                     return;
                 }
 
@@ -1810,7 +1887,7 @@ namespace RevitScheduleEditor
                 if (_columnFilters.Count == 0)
                 {
                     DebugLog("ApplyFilters - No filters active, showing all data");
-                    dataGrid.ItemsSource = _viewModel.ScheduleData;
+                    ScheduleDataGrid.ItemsSource = _viewModel.ScheduleData;
                     
                     // Update all column headers to reflect no filters
                     UpdateAllColumnHeadersAppearance();
@@ -1865,10 +1942,10 @@ namespace RevitScheduleEditor
                 var resultList = filteredData.ToList();
                 DebugLog($"ApplyFilters - Filtered data count: {resultList.Count}");
 
-                // Update DataGrid's ItemsSource
-                dataGrid.ItemsSource = resultList;
+                // Update ScheduleDataGrid's ItemsSource
+                ScheduleDataGrid.ItemsSource = resultList;
                 
-                DebugLog("ApplyFilters - DataGrid ItemsSource updated successfully");
+                DebugLog("ApplyFilters - ScheduleDataGrid ItemsSource updated successfully");
                 
                 // Update all column headers to reflect current filter status
                 UpdateAllColumnHeadersAppearance();
@@ -1879,10 +1956,10 @@ namespace RevitScheduleEditor
                 DebugLog($"ApplyFilters - StackTrace: {ex.StackTrace}");
                 
                 // On error, show all data
-                var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
-                if (dataGrid != null)
+                var ScheduleDataGrid = this.FindName("ScheduleDataGrid") as ScheduleDataGrid;
+                if (ScheduleDataGrid != null)
                 {
-                    dataGrid.ItemsSource = _viewModel.ScheduleData;
+                    ScheduleDataGrid.ItemsSource = _viewModel.ScheduleData;
                     DebugLog("ApplyFilters - Restored original data due to error");
                 }
             }
@@ -1891,25 +1968,27 @@ namespace RevitScheduleEditor
         #region Copy/Paste Functionality
         
         private string _clipboardData = string.Empty;
+
+        // Event handlers for new menu items - using existing methods
         
         private void CopyCells()
         {
-            var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
-            if (dataGrid == null) 
+            var ScheduleDataGrid = this.FindName("ScheduleDataGrid") as ScheduleDataGrid;
+            if (ScheduleDataGrid == null) 
             {
-                DebugLog("CopyCells - DataGrid not found");
+                DebugLog("CopyCells - ScheduleDataGrid not found");
                 return;
             }
             
-            var selectedCells = dataGrid.SelectedCells;
-            DebugLog($"CopyCells - DataGrid found, SelectedCells count: {selectedCells?.Count ?? 0}");
+            var selectedCells = ScheduleDataGrid.SelectedCells;
+            DebugLog($"CopyCells - ScheduleDataGrid found, SelectedCells count: {selectedCells?.Count ?? 0}");
             
             if (selectedCells == null || selectedCells.Count == 0)
             {
                 DebugLog("CopyCells - No cells selected");
                 
                 // Try to get current cell if no selection
-                var currentCell = dataGrid.CurrentCell;
+                var currentCell = ScheduleDataGrid.CurrentCell;
                 if (currentCell.Item != null && currentCell.Column != null)
                 {
                     DebugLog($"CopyCells - Using current cell: {currentCell.Column.Header}");
@@ -1943,6 +2022,9 @@ namespace RevitScheduleEditor
             
             try
             {
+                // Save state for potential undo
+                _viewModel.SaveStateForUndo();
+                
                 // Convert selected cells to text format (tab-separated)
                 var cellData = new List<string>();
                 
@@ -1951,7 +2033,7 @@ namespace RevitScheduleEditor
                     .Cast<DataGridCellInfo>()
                     .Where(cell => cell.Item != null && cell.Column != null)
                     .GroupBy(cell => cell.Item)
-                    .OrderBy(group => dataGrid.Items.IndexOf(group.Key))
+                    .OrderBy(group => ScheduleDataGrid.Items.IndexOf(group.Key))
                     .ToList();
                 
                 DebugLog($"CopyCells - Grouped into {cellsByRow.Count} rows");
@@ -1978,28 +2060,37 @@ namespace RevitScheduleEditor
                                 var fieldName = originalPath.Trim('[', ']');
                                 DebugLog($"CopyCells - Original binding path: '{originalPath}', Field name: '{fieldName}'");
                                 
-                                var value = scheduleRow[fieldName];
-                                DebugLog($"CopyCells - ScheduleRow has key '{fieldName}': {scheduleRow.Values?.ContainsKey(fieldName)}");
+                                string value = "";
                                 
-                                if (string.IsNullOrEmpty(value))
+                                // Handle Element ID column specially
+                                if (fieldName == "Id" || column.Header?.ToString() == "Element ID")
                                 {
-                                    // Try alternative access methods
-                                    try
+                                    value = scheduleRow.GetElement().Id.IntegerValue.ToString();
+                                }
+                                else
+                                {
+                                    value = scheduleRow[fieldName] ?? "";
+                                    
+                                    // If empty, try alternative access methods
+                                    if (string.IsNullOrEmpty(value))
                                     {
-                                        var property = scheduleRow.GetType().GetProperty(fieldName);
-                                        if (property != null)
+                                        try
                                         {
-                                            value = property.GetValue(scheduleRow)?.ToString() ?? "";
-                                            DebugLog($"CopyCells - Got value via reflection: '{value}'");
+                                            var property = scheduleRow.GetType().GetProperty(fieldName);
+                                            if (property != null)
+                                            {
+                                                value = property.GetValue(scheduleRow)?.ToString() ?? "";
+                                                DebugLog($"CopyCells - Got value via reflection: '{value}'");
+                                            }
                                         }
-                                    }
-                                    catch (Exception reflEx)
-                                    {
-                                        DebugLog($"CopyCells - Reflection failed: {reflEx.Message}");
+                                        catch (Exception reflEx)
+                                        {
+                                            DebugLog($"CopyCells - Reflection failed: {reflEx.Message}");
+                                        }
                                     }
                                 }
                                 
-                                rowValues.Add(value ?? "");
+                                rowValues.Add(value);
                                 DebugLog($"CopyCells - Cell [{fieldName}] = '{value}'");
                             }
                         }
@@ -2013,11 +2104,25 @@ namespace RevitScheduleEditor
                 
                 _clipboardData = string.Join("\n", cellData);
                 
-                // Also copy to system clipboard
+                // Also copy to system clipboard in multiple formats
                 if (!string.IsNullOrEmpty(_clipboardData))
                 {
-                    Clipboard.SetText(_clipboardData);
+                    var dataObject = new DataObject();
+                    
+                    // Plain text format
+                    dataObject.SetText(_clipboardData, TextDataFormat.Text);
+                    dataObject.SetText(_clipboardData, TextDataFormat.UnicodeText);
+                    
+                    // CSV format for Excel compatibility
+                    var csvData = _clipboardData.Replace('\t', ',');
+                    dataObject.SetData("CSV", csvData);
+                    
+                    Clipboard.SetDataObject(dataObject, true);
+                    
                     DebugLog($"CopyCells - Successfully copied {cellData.Count} rows to clipboard");
+                    
+                    // Show status message
+                    _viewModel.LoadingStatus = $"✅ Đã copy {selectedCells.Count} ô vào clipboard";
                 }
                 else
                 {
@@ -2028,18 +2133,389 @@ namespace RevitScheduleEditor
             {
                 DebugLog($"CopyCells - Error: {ex.Message}");
                 DebugLog($"CopyCells - StackTrace: {ex.StackTrace}");
+                MessageBox.Show($"Lỗi khi copy dữ liệu: {ex.Message}", "Copy Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+
+        // Clipboard processing flags for ProcessCmdKey approach
+        private bool isProcessingClipboard = false;
+        private DateTime lastClipboardAction = DateTime.MinValue;
+        private const int DEBOUNCE_INTERVAL_MS = 100; // 100ms debounce to prevent auto-repeat
+
+        #region Pure CommandBinding Handlers (Clean & Simple)
+
+        // Copy: CanExecute - Allow when cells are selected (works for ScheduleDataGrid or edit elements)
+        private void Copy_CanExecute(object sender, CanExecuteRoutedEventArgs e)
+        {
+            // Find ScheduleDataGrid regardless of sender (could be ScheduleDataGrid, DataGridCell, or TextBox in edit mode)
+            var ScheduleDataGrid = FindDataGridFromSender(sender) ?? this.FindName("ScheduleDataGrid") as ScheduleDataGrid;
+            e.CanExecute = ScheduleDataGrid != null && ScheduleDataGrid.SelectedCells.Count > 0;
+            e.Handled = true;
+            DebugLog($"Copy_CanExecute - Sender: {sender?.GetType().Name}, CanExecute: {e.CanExecute}, SelectedCells: {ScheduleDataGrid?.SelectedCells.Count ?? 0}");
+        }
+
+        // Copy: Execute - Extract selected cells data like Sheetlink, set to Clipboard (handles edit mode)
+        private void Copy_Executed(object sender, ExecutedRoutedEventArgs e)
+        {
+            DebugLog($"Copy_Executed - Class-level CommandBinding triggered, Sender: {sender?.GetType().Name}");
+            
+            // Find ScheduleDataGrid regardless of sender (could be ScheduleDataGrid, DataGridCell, or TextBox in edit mode)
+            var ScheduleDataGrid = FindDataGridFromSender(sender) ?? this.FindName("ScheduleDataGrid") as ScheduleDataGrid;
+            if (ScheduleDataGrid?.SelectedCells.Count > 0)
+            {
+                try
+                {
+                    // Get selected cells in row/column order
+                    var selectedCells = ScheduleDataGrid.SelectedCells
+                        .OrderBy(c => ScheduleDataGrid.Items.IndexOf(c.Item))
+                        .ThenBy(c => c.Column.DisplayIndex)
+                        .ToList();
+
+                    var sb = new StringBuilder();
+                    int currentRow = -1;
+                    
+                    foreach (var cell in selectedCells)
+                    {
+                        int rowIndex = ScheduleDataGrid.Items.IndexOf(cell.Item);
+                        
+                        if (rowIndex != currentRow)
+                        {
+                            if (currentRow >= 0) sb.AppendLine();
+                            currentRow = rowIndex;
+                        }
+                        else
+                        {
+                            sb.Append("\t");
+                        }
+                        
+                        // Get cell value via binding
+                        string cellValue = GetCellValueFromBinding(cell) ?? "";
+                        sb.Append(cellValue);
+                    }
+                    
+                    string result = sb.ToString();
+                    Clipboard.SetText(result);
+                    DebugLog($"Copy_Executed - Successfully copied {selectedCells.Count} cells, {result.Length} chars");
+                    ShowStatusMessage($"Copied {selectedCells.Count} cells");
+                }
+                catch (Exception ex)
+                {
+                    DebugLog($"Copy_Executed - Error: {ex.Message}");
+                    ShowStatusMessage($"Copy failed: {ex.Message}");
+                }
+            }
+            e.Handled = true;
+        }
+
+        // Paste: CanExecute - Allow when clipboard contains text (works for ScheduleDataGrid or edit elements)
+        private void Paste_CanExecute(object sender, CanExecuteRoutedEventArgs e)
+        {
+            e.CanExecute = Clipboard.ContainsText();
+            e.Handled = true;
+            DebugLog($"Paste_CanExecute - Sender: {sender?.GetType().Name}, CanExecute: {e.CanExecute}");
+        }
+
+        // Paste: Execute - Parse text and assign to ScheduleDataGrid cells (handles edit mode)
+        private void Paste_Executed(object sender, ExecutedRoutedEventArgs e)
+        {
+            DebugLog($"Paste_Executed - Class-level CommandBinding triggered, Sender: {sender?.GetType().Name}");
+            
+            // Find ScheduleDataGrid regardless of sender (could be ScheduleDataGrid, DataGridCell, or TextBox in edit mode)
+            var ScheduleDataGrid = FindDataGridFromSender(sender) ?? this.FindName("ScheduleDataGrid") as ScheduleDataGrid;
+            var currentCell = ScheduleDataGrid?.CurrentCell;
+            
+            if (ScheduleDataGrid == null || currentCell?.Item == null)
+            {
+                DebugLog("Paste_Executed - No valid current cell");
+                e.Handled = true;
+                return;
+            }
+            
+            try
+            {
+                string text = Clipboard.GetText();
+                if (string.IsNullOrEmpty(text))
+                {
+                    DebugLog("Paste_Executed - Clipboard is empty");
+                    e.Handled = true;
+                    return;
+                }
+                
+                var rows = text.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+                int startRowIndex = ScheduleDataGrid.Items.IndexOf(currentCell.Value.Item);
+                int startColIndex = currentCell.Value.Column.DisplayIndex;
+                
+                DebugLog($"Paste_Executed - Pasting {rows.Length} rows starting at [{startRowIndex},{startColIndex}]");
+                
+                for (int i = 0; i < rows.Length; i++)
+                {
+                    var values = rows[i].Split('\t');
+                    for (int j = 0; j < values.Length; j++)
+                    {
+                        int targetRow = startRowIndex + i;
+                        int targetCol = startColIndex + j;
+                        
+                        if (targetRow < ScheduleDataGrid.Items.Count && targetCol < ScheduleDataGrid.Columns.Count)
+                        {
+                            var targetColumn = ScheduleDataGrid.Columns.FirstOrDefault(c => c.DisplayIndex == targetCol);
+                            var targetItem = ScheduleDataGrid.Items[targetRow];
+                            
+                            SetCellValueViaBinding(targetItem, targetColumn, values[j]);
+                        }
+                    }
+                }
+                
+                ScheduleDataGrid.Items.Refresh();
+                DebugLog("Paste_Executed - Paste completed successfully");
+                ShowStatusMessage($"Pasted {rows.Length} rows");
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"Paste_Executed - Error: {ex.Message}");
+                ShowStatusMessage($"Paste failed: {ex.Message}");
+            }
+            
+            e.Handled = true;
+        }
+
+        // Cut: CanExecute - Same as Copy
+        private void Cut_CanExecute(object sender, CanExecuteRoutedEventArgs e)
+        {
+            Copy_CanExecute(sender, e);
+        }
+
+        // Cut: Execute - Copy then clear (handles edit mode via Copy handler)
+        private void Cut_Executed(object sender, ExecutedRoutedEventArgs e)
+        {
+            DebugLog($"Cut_Executed - Class-level CommandBinding triggered, Sender: {sender?.GetType().Name}");
+            
+            // First copy
+            Copy_Executed(sender, e);
+            
+            // Then clear selected cells
+            var ScheduleDataGrid = sender as ScheduleDataGrid ?? this.FindName("ScheduleDataGrid") as ScheduleDataGrid;
+            if (ScheduleDataGrid?.SelectedCells.Count > 0)
+            {
+                try
+                {
+                    foreach (var cell in ScheduleDataGrid.SelectedCells.ToList())
+                    {
+                        SetCellValueViaBinding(cell.Item, cell.Column, "");
+                    }
+                    
+                    ScheduleDataGrid.Items.Refresh();
+                    DebugLog($"Cut_Executed - Cleared {ScheduleDataGrid.SelectedCells.Count} cells");
+                    ShowStatusMessage($"Cut {ScheduleDataGrid.SelectedCells.Count} cells");
+                }
+                catch (Exception ex)
+                {
+                    DebugLog($"Cut_Executed - Clear error: {ex.Message}");
+                }
+            }
+            
+            e.Handled = true;
+        }
+
+        /// <summary>
+        /// Tìm ScheduleDataGrid từ sender, dù sender là ScheduleDataGrid, DataGridCell, hay TextBox trong edit mode
+        /// </summary>
+        private ScheduleDataGrid FindDataGridFromSender(object sender)
+        {
+            if (sender == null) return null;
+            
+            // Nếu sender chính là ScheduleDataGrid
+            if (sender is ScheduleDataGrid dg) return dg;
+            
+            // Nếu sender là FrameworkElement, tìm ScheduleDataGrid ancestor
+            if (sender is FrameworkElement element)
+            {
+                var parent = element;
+                while (parent != null)
+                {
+                    if (parent is ScheduleDataGrid ScheduleDataGrid) return ScheduleDataGrid;
+                    parent = parent.Parent as FrameworkElement ?? 
+                            (parent.Parent as FrameworkContentElement)?.Parent as FrameworkElement ??
+                            LogicalTreeHelper.GetParent(parent) as FrameworkElement;
+                }
+            }
+            
+            return null;
+        }
+
+        #endregion
+
+        // No keyboard event handlers needed - Pure CommandBinding approach
+
+        // Safe clipboard action executor với error handling
+        private void ExecuteClipboardAction(Action action)
+        {
+            if (isProcessingClipboard) return;
+
+            isProcessingClipboard = true;
+            try
+            {
+                DebugLog("ExecuteClipboardAction - Starting");
+                action.Invoke();
+                lastClipboardAction = DateTime.Now;
+                DebugLog("ExecuteClipboardAction - Completed successfully");
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"ExecuteClipboardAction - Error: {ex.Message}");
+                DebugLog($"ExecuteClipboardAction - StackTrace: {ex.StackTrace}");
+            }
+            finally
+            {
+                isProcessingClipboard = false;
+            }
+        }
+
+        // ScheduleDataGrid-specific handlers
+        private void HandleCopyFromDataGrid(ScheduleDataGrid ScheduleDataGrid)
+        {
+            DebugLog("HandleCopyFromDataGrid - Starting copy operation from ScheduleDataGrid CommandBinding");
+            
+            try
+            {
+                if (ScheduleDataGrid == null || ScheduleDataGrid.SelectedCells.Count == 0)
+                {
+                    DebugLog("HandleCopyFromDataGrid - No cells selected or ScheduleDataGrid null");
+                    ShowStatusMessage("No cells selected to copy");
+                    return;
+                }
+
+                string data = GetSelectedCellsData(ScheduleDataGrid);
+                if (!string.IsNullOrEmpty(data))
+                {
+                    Clipboard.SetText(data);
+                    DebugLog($"HandleCopyFromDataGrid - Successfully copied {ScheduleDataGrid.SelectedCells.Count} cells to system clipboard");
+                    ShowStatusMessage($"Copied {ScheduleDataGrid.SelectedCells.Count} cells");
+                    
+                    // Store in internal clipboard as well
+                    _clipboardData = data;
+                }
+                else
+                {
+                    DebugLog("HandleCopyFromDataGrid - No data extracted from selected cells");
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"HandleCopyFromDataGrid - Error: {ex.Message}");
+                ShowStatusMessage($"Copy failed: {ex.Message}");
+            }
+        }
+
+        private void HandleCopy()
+        {
+            var ScheduleDataGrid = this.FindName("ScheduleDataGrid") as ScheduleDataGrid;
+            HandleCopyFromDataGrid(ScheduleDataGrid);
+        }
+
+        private void HandlePasteToDataGrid(ScheduleDataGrid ScheduleDataGrid)
+        {
+            DebugLog("HandlePasteToDataGrid - Starting paste operation from ScheduleDataGrid CommandBinding");
+            
+            try
+            {
+                if (ScheduleDataGrid == null)
+                {
+                    DebugLog("HandlePasteToDataGrid - ScheduleDataGrid is null");
+                    return;
+                }
+
+                string clipboardData = "";
+                
+                // Try system clipboard first
+                if (Clipboard.ContainsText())
+                {
+                    clipboardData = Clipboard.GetText();
+                    DebugLog($"HandlePasteToDataGrid - Got {clipboardData.Length} chars from system clipboard");
+                }
+                
+                // Fallback to internal clipboard
+                if (string.IsNullOrEmpty(clipboardData) && !string.IsNullOrEmpty(_clipboardData))
+                {
+                    clipboardData = _clipboardData;
+                    DebugLog($"HandlePasteToDataGrid - Using internal clipboard data ({clipboardData.Length} chars)");
+                }
+
+                if (string.IsNullOrEmpty(clipboardData))
+                {
+                    DebugLog("HandlePasteToDataGrid - No text data available in any clipboard");
+                    ShowStatusMessage("No text data to paste");
+                    return;
+                }
+
+                PasteDataToGrid(ScheduleDataGrid, clipboardData);
+                DebugLog("HandlePasteToDataGrid - Data pasted successfully from ScheduleDataGrid CommandBinding");
+                ShowStatusMessage("Data pasted successfully");
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"HandlePasteToDataGrid - Error: {ex.Message}");
+                ShowStatusMessage($"Paste failed: {ex.Message}");
+            }
+        }
+
+        private void HandlePaste()
+        {
+            var ScheduleDataGrid = this.FindName("ScheduleDataGrid") as ScheduleDataGrid;
+            HandlePasteToDataGrid(ScheduleDataGrid);
+        }
+
+        private void HandleCutFromDataGrid(ScheduleDataGrid ScheduleDataGrid)
+        {
+            DebugLog("HandleCutFromDataGrid - Starting cut operation from ScheduleDataGrid CommandBinding");
+            
+            try
+            {
+                if (ScheduleDataGrid == null || ScheduleDataGrid.SelectedCells.Count == 0)
+                {
+                    DebugLog("HandleCutFromDataGrid - No cells selected or ScheduleDataGrid null");
+                    ShowStatusMessage("No cells selected to cut");
+                    return;
+                }
+
+                // First copy the data
+                HandleCopyFromDataGrid(ScheduleDataGrid);
+                
+                // Then clear the selected cells
+                if (ScheduleDataGrid.SelectedCells.Count > 0)
+                {
+                    var selectedCount = ScheduleDataGrid.SelectedCells.Count;
+                    ClearSelectedCells(ScheduleDataGrid);
+                    DebugLog($"HandleCutFromDataGrid - Cut (copied + cleared) {selectedCount} cells");
+                    ShowStatusMessage($"Cut {selectedCount} cells");
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"HandleCutFromDataGrid - Error: {ex.Message}");
+                ShowStatusMessage($"Cut failed: {ex.Message}");
+            }
+        }
+
+        private void HandleCut()
+        {
+            var ScheduleDataGrid = this.FindName("ScheduleDataGrid") as ScheduleDataGrid;
+            HandleCutFromDataGrid(ScheduleDataGrid);
         }
         
         private void PasteCells()
         {
-            var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
-            if (dataGrid == null) return;
+            var ScheduleDataGrid = this.FindName("ScheduleDataGrid") as ScheduleDataGrid;
+            if (ScheduleDataGrid == null) 
+            {
+                DebugLog("PasteCells - ScheduleDataGrid not found");
+                return;
+            }
             
-            var currentCell = dataGrid.CurrentCell;
+            var currentCell = ScheduleDataGrid.CurrentCell;
             if (currentCell.Item == null || currentCell.Column == null)
             {
                 DebugLog("PasteCells - No current cell selected");
+                MessageBox.Show("Vui lòng chọn một ô để làm điểm bắt đầu paste.", "Paste", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
             
@@ -2059,61 +2535,121 @@ namespace RevitScheduleEditor
                 if (string.IsNullOrEmpty(clipboardText))
                 {
                     DebugLog("PasteCells - No clipboard data available");
+                    MessageBox.Show("Clipboard trống. Vui lòng copy dữ liệu trước khi paste.", "Paste", MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
                 
+                // Save state for undo
+                _viewModel.SaveStateForUndo();
+                
                 DebugLog($"PasteCells - Pasting data: {clipboardText.Replace('\n', '|').Replace('\t', ',')}");
                 
-                // Parse clipboard data
-                var rows = clipboardText.Split('\n');
-                var startRowIndex = dataGrid.Items.IndexOf(currentCell.Item);
+                // Parse clipboard data - handle both tab and comma separators
+                var rows = clipboardText.Split(new char[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+                var startRowIndex = ScheduleDataGrid.Items.IndexOf(currentCell.Item);
                 var startColumnIndex = currentCell.Column.DisplayIndex;
                 
                 DebugLog($"PasteCells - Starting at row {startRowIndex}, column {startColumnIndex}");
                 
                 int pastedCells = 0;
+                int skippedCells = 0;
+                var modifiedRows = new HashSet<ScheduleRow>();
                 
                 for (int rowOffset = 0; rowOffset < rows.Length; rowOffset++)
                 {
                     var targetRowIndex = startRowIndex + rowOffset;
-                    if (targetRowIndex >= dataGrid.Items.Count) break;
+                    if (targetRowIndex >= ScheduleDataGrid.Items.Count) break;
                     
-                    var scheduleRow = dataGrid.Items[targetRowIndex] as ScheduleRow;
+                    var scheduleRow = ScheduleDataGrid.Items[targetRowIndex] as ScheduleRow;
                     if (scheduleRow == null) continue;
                     
-                    var cellValues = rows[rowOffset].Split('\t');
+                    // Auto-detect separator (tab or comma)
+                    var rowData = rows[rowOffset];
+                    char separator = '\t';
+                    if (!rowData.Contains('\t') && rowData.Contains(','))
+                    {
+                        separator = ',';
+                    }
+                    
+                    var cellValues = rowData.Split(separator);
                     
                     for (int colOffset = 0; colOffset < cellValues.Length; colOffset++)
                     {
                         var targetColumnIndex = startColumnIndex + colOffset;
-                        if (targetColumnIndex >= dataGrid.Columns.Count) break;
+                        if (targetColumnIndex >= ScheduleDataGrid.Columns.Count) break;
                         
-                        var column = dataGrid.Columns[targetColumnIndex] as DataGridBoundColumn;
+                        var column = ScheduleDataGrid.Columns[targetColumnIndex] as DataGridBoundColumn;
                         if (column == null) continue;
+                        
+                        // Skip read-only columns (like Element ID)
+                        if (column.IsReadOnly)
+                        {
+                            skippedCells++;
+                            continue;
+                        }
                         
                         var binding = column.Binding as System.Windows.Data.Binding;
                         if (binding == null) continue;
                         
                         var fieldName = binding.Path.Path.Trim('[', ']');
-                        var newValue = cellValues[colOffset];
+                        var newValue = cellValues[colOffset].Trim();
                         
-                        // Set the value using the indexer
-                        scheduleRow[fieldName] = newValue;
-                        pastedCells++;
-                        
-                        DebugLog($"PasteCells - Set [{fieldName}] = '{newValue}' in row {targetRowIndex}");
+                        // Validate and convert data if needed
+                        try
+                        {
+                            // Handle special columns
+                            if (fieldName == "Id" || column.Header?.ToString() == "Element ID")
+                            {
+                                skippedCells++; // Can't modify Element ID
+                                continue;
+                            }
+                            
+                            // Set the value using the indexer
+                            var oldValue = scheduleRow[fieldName];
+                            if (oldValue != newValue)
+                            {
+                                scheduleRow[fieldName] = newValue;
+                                pastedCells++;
+                                modifiedRows.Add(scheduleRow);
+                                
+                                DebugLog($"PasteCells - Set [{fieldName}] = '{newValue}' (was '{oldValue}') in row {targetRowIndex}");
+                            }
+                        }
+                        catch (Exception cellEx)
+                        {
+                            DebugLog($"PasteCells - Error setting value for [{fieldName}]: {cellEx.Message}");
+                            skippedCells++;
+                        }
                     }
                 }
                 
-                DebugLog($"PasteCells - Successfully pasted {pastedCells} cells");
+                DebugLog($"PasteCells - Successfully pasted {pastedCells} cells, skipped {skippedCells} cells");
                 
-                // Refresh the DataGrid and Update Model button
-                dataGrid.Items.Refresh();
+                // Refresh the ScheduleDataGrid and Update Model button
+                ScheduleDataGrid.Items.Refresh();
                 _viewModel.RefreshUpdateButtonState();
+                
+                // Show completion message
+                var message = $"✅ Đã paste {pastedCells} ô";
+                if (skippedCells > 0)
+                {
+                    message += $", bỏ qua {skippedCells} ô (read-only)";
+                }
+                message += $", {modifiedRows.Count} hàng đã thay đổi";
+                
+                _viewModel.LoadingStatus = message;
+                
+                if (pastedCells == 0)
+                {
+                    MessageBox.Show("Không có dữ liệu nào được paste. Có thể các ô đích là read-only hoặc dữ liệu không hợp lệ.", 
+                                   "Paste", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
             }
             catch (Exception ex)
             {
                 DebugLog($"PasteCells - Error: {ex.Message}");
+                DebugLog($"PasteCells - StackTrace: {ex.StackTrace}");
+                MessageBox.Show($"Lỗi khi paste dữ liệu: {ex.Message}", "Paste Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
         
@@ -2162,7 +2698,7 @@ namespace RevitScheduleEditor
                 var filterStatusPanel = this.FindName("FilterStatusPanel") as StackPanel;
                 var filterStatusText = this.FindName("FilterStatusText") as TextBlock;
                 var filteredRowCountText = this.FindName("FilteredRowCountText") as TextBlock;
-                var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
+                var ScheduleDataGrid = this.FindName("ScheduleDataGrid") as ScheduleDataGrid;
                 
                 if (filterStatusPanel == null || filterStatusText == null || filteredRowCountText == null)
                 {
@@ -2194,9 +2730,9 @@ namespace RevitScheduleEditor
                                           (filterSummary.Count > 3 ? $" +{filterSummary.Count - 3} more" : "");
                     
                     // Show filtered row count
-                    if (dataGrid?.ItemsSource != null)
+                    if (ScheduleDataGrid?.ItemsSource != null)
                     {
-                        var filteredCount = (dataGrid.ItemsSource as System.Collections.IEnumerable)?.Cast<object>().Count() ?? 0;
+                        var filteredCount = (ScheduleDataGrid.ItemsSource as System.Collections.IEnumerable)?.Cast<object>().Count() ?? 0;
                         var totalCount = _viewModel?.ScheduleData?.Count ?? 0;
                         filteredRowCountText.Text = $"Showing {filteredCount:N0} of {totalCount:N0} rows";
                     }
@@ -2239,10 +2775,10 @@ namespace RevitScheduleEditor
 
             try
             {
-                var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
-                if (dataGrid == null) 
+                var ScheduleDataGrid = this.FindName("ScheduleDataGrid") as ScheduleDataGrid;
+                if (ScheduleDataGrid == null) 
                 {
-                    DebugLog("ApplyFiltersEnhanced - DataGrid not found");
+                    DebugLog("ApplyFiltersEnhanced - ScheduleDataGrid not found");
                     return;
                 }
 
@@ -2252,7 +2788,7 @@ namespace RevitScheduleEditor
                 // If no filters, show all data
                 if (_columnFilters.Count == 0)
                 {
-                    dataGrid.ItemsSource = _viewModel.ScheduleData;
+                    ScheduleDataGrid.ItemsSource = _viewModel.ScheduleData;
                     DebugLog("ApplyFiltersEnhanced - No filters, showing all data");
                     UpdateFilterStatusDisplay();
                     return;
@@ -2299,8 +2835,8 @@ namespace RevitScheduleEditor
                 var filteredCount = filteredData.Count;
                 DebugLog($"ApplyFiltersEnhanced - Filtered to {filteredCount} rows from {totalRows}");
 
-                // Update DataGrid
-                dataGrid.ItemsSource = filteredData;
+                // Update ScheduleDataGrid
+                ScheduleDataGrid.ItemsSource = filteredData;
                 
                 // Update filter status display
                 UpdateFilterStatusDisplay();
@@ -2312,14 +2848,407 @@ namespace RevitScheduleEditor
                 DebugLog($"ApplyFiltersEnhanced - Error: {ex.Message}");
                 
                 // On error, show all data
-                var dataGrid = this.FindName("ScheduleDataGrid") as DataGrid;
-                if (dataGrid != null)
+                var ScheduleDataGrid = this.FindName("ScheduleDataGrid") as ScheduleDataGrid;
+                if (ScheduleDataGrid != null)
                 {
-                    dataGrid.ItemsSource = _viewModel.ScheduleData;
+                    ScheduleDataGrid.ItemsSource = _viewModel.ScheduleData;
                 }
             }
         }
         
         #endregion
+
+        #region Additional Event Handlers
+
+        // Duplicate method removed - using existing ClearAllFiltersButton_Click
+
+        // Enhanced copy column with better formatting
+        private void CopyColumnAdvanced(DataGridColumn column)
+        {
+            if (column == null) return;
+            
+            try
+            {
+                var ScheduleDataGrid = this.FindName("ScheduleDataGrid") as ScheduleDataGrid;
+                if (ScheduleDataGrid == null) return;
+                
+                var columnValues = new List<string>();
+                string columnName = column.Header?.ToString() ?? "Column";
+                
+                // Add header with formatting
+                columnValues.Add($"=== {columnName} ===");
+                columnValues.Add(""); // Empty line for readability
+                
+                var binding = (column as DataGridBoundColumn)?.Binding as System.Windows.Data.Binding;
+                if (binding?.Path?.Path == null) return;
+                
+                string propertyPath = binding.Path.Path.Trim('[', ']');
+                
+                // Add statistics
+                var allValues = new List<string>();
+                
+                foreach (var item in ScheduleDataGrid.Items)
+                {
+                    if (item == null) continue;
+                    
+                    string cellValue = "";
+                    if (propertyPath == "Id" || columnName == "Element ID")
+                    {
+                        var scheduleRow = item as ScheduleRow;
+                        cellValue = scheduleRow?.GetElement().Id.IntegerValue.ToString() ?? "";
+                    }
+                    else
+                    {
+                        try
+                        {
+                            var property = item.GetType().GetProperty(propertyPath);
+                            if (property != null)
+                            {
+                                var value = property.GetValue(item);
+                                cellValue = value?.ToString() ?? "";
+                            }
+                        }
+                        catch
+                        {
+                            cellValue = "";
+                        }
+                    }
+                    
+                    allValues.Add(cellValue);
+                    columnValues.Add(cellValue);
+                }
+                
+                // Add summary statistics
+                columnValues.Add(""); // Empty line
+                columnValues.Add("=== THỐNG KÊ ===");
+                columnValues.Add($"Tổng số hàng: {allValues.Count}");
+                
+                var nonEmptyValues = allValues.Where(v => !string.IsNullOrWhiteSpace(v)).ToList();
+                columnValues.Add($"Có dữ liệu: {nonEmptyValues.Count}");
+                columnValues.Add($"Trống: {allValues.Count - nonEmptyValues.Count}");
+                
+                var uniqueValues = nonEmptyValues.Distinct().Count();
+                columnValues.Add($"Giá trị duy nhất: {uniqueValues}");
+                
+                // Try to detect if it's numeric
+                var numericValues = nonEmptyValues.Where(v => double.TryParse(v, out _)).Select(v => double.Parse(v)).ToList();
+                if (numericValues.Any())
+                {
+                    columnValues.Add($"Min: {numericValues.Min():F2}");
+                    columnValues.Add($"Max: {numericValues.Max():F2}");
+                    columnValues.Add($"Trung bình: {numericValues.Average():F2}");
+                }
+                
+                string clipboardText = string.Join("\n", columnValues);
+                Clipboard.SetText(clipboardText);
+                
+                _viewModel.LoadingStatus = $"✅ Đã copy cột '{columnName}' với {allValues.Count} giá trị và thống kê";
+                
+                DebugLog($"CopyColumnAdvanced - Copied column '{columnName}' with statistics");
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"CopyColumnAdvanced - Error: {ex.Message}");
+                MessageBox.Show($"Lỗi khi copy cột: {ex.Message}", "Copy Column Error", 
+                               MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+
+
+        // PreviewKeyDown - catches key combinations before they're processed
+        private void ScheduleDataGrid_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            DebugLog($"PreviewKeyDown - Key: {e.Key}, Modifiers: {Keyboard.Modifiers}");
+
+            // Only process letter keys when Ctrl is pressed
+            if ((Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
+            {
+                switch (e.Key)
+                {
+                    case Key.C:
+                        DebugLog("Ctrl+C detected in PreviewKeyDown - Executing CopyCells");
+                        CopyCells();
+                        e.Handled = true;
+                        break;
+                        
+                    case Key.V:
+                        DebugLog("Ctrl+V detected in PreviewKeyDown - Executing PasteCells");
+                        PasteCells();
+                        e.Handled = true;
+                        break;
+                        
+                    case Key.X:
+                        DebugLog("Ctrl+X detected in PreviewKeyDown - Executing CutCells");
+                        CopyCells();
+                        e.Handled = true;
+                        break;
+                }
+            }
+        }
+
+        #endregion
+
+        // Helper methods for clipboard operations - Optimized for WPF ScheduleDataGrid
+        private string GetSelectedCellsData(ScheduleDataGrid ScheduleDataGrid)
+        {
+            DebugLog("GetSelectedCellsData - Starting (WPF CommandBinding approach)");
+            
+            var selectedCells = ScheduleDataGrid.SelectedCells.OrderBy(c => ScheduleDataGrid.Items.IndexOf(c.Item))
+                                                    .ThenBy(c => c.Column.DisplayIndex)
+                                                    .ToList();
+            
+            if (selectedCells.Count == 0) 
+            {
+                DebugLog("GetSelectedCellsData - No cells selected");
+                return "";
+            }
+
+            var sb = new StringBuilder();
+            int currentRowIndex = -1;
+            
+            foreach (var cell in selectedCells)
+            {
+                int rowIndex = ScheduleDataGrid.Items.IndexOf(cell.Item);
+                
+                if (rowIndex != currentRowIndex)
+                {
+                    if (currentRowIndex >= 0) sb.AppendLine();
+                    currentRowIndex = rowIndex;
+                }
+                else
+                {
+                    sb.Append("\t"); // Tab separator for same row
+                }
+                
+                // Get cell value using WPF binding path
+                string cellValue = "";
+                try
+                {
+                    if (cell.Column is DataGridBoundColumn boundColumn && 
+                        boundColumn.Binding is System.Windows.Data.Binding binding)
+                    {
+                        var propertyName = binding.Path.Path;
+                        var property = cell.Item.GetType().GetProperty(propertyName);
+                        if (property != null)
+                        {
+                            var value = property.GetValue(cell.Item);
+                            cellValue = value?.ToString() ?? "";
+                        }
+                    }
+                    else
+                    {
+                        // Fallback: get content from visual element
+                        var cellContent = cell.Column.GetCellContent(cell.Item);
+                        if (cellContent is TextBlock textBlock)
+                        {
+                            cellValue = textBlock.Text ?? "";
+                        }
+                        else if (cellContent is ContentPresenter contentPresenter)
+                        {
+                            cellValue = contentPresenter.Content?.ToString() ?? "";
+                        }
+                        else
+                        {
+                            cellValue = cellContent?.ToString() ?? "";
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    DebugLog($"GetSelectedCellsData - Error getting cell value: {ex.Message}");
+                    cellValue = "";
+                }
+                
+                sb.Append(cellValue);
+            }
+            
+            string result = sb.ToString();
+            DebugLog($"GetSelectedCellsData - Extracted {selectedCells.Count} cells, {result.Length} characters");
+            return result;
+        }
+        
+        private void PasteDataToGrid(ScheduleDataGrid ScheduleDataGrid, string data)
+        {
+            DebugLog("PasteDataToGrid - Starting");
+            
+            var currentCell = ScheduleDataGrid.CurrentCell;
+            if (currentCell.Item == null)
+            {
+                DebugLog("PasteDataToGrid - No current cell selected");
+                ShowStatusMessage("Please select a cell to start pasting");
+                return;
+            }
+
+            string[] rows = data.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            int startRowIndex = ScheduleDataGrid.Items.IndexOf(currentCell.Item);
+            int startColIndex = currentCell.Column.DisplayIndex;
+            
+            DebugLog($"PasteDataToGrid - Pasting {rows.Length} rows starting at row {startRowIndex}, col {startColIndex}");
+            
+            for (int i = 0; i < rows.Length; i++)
+            {
+                string[] cells = rows[i].Split('\t');
+                
+                for (int j = 0; j < cells.Length; j++)
+                {
+                    int targetRowIndex = startRowIndex + i;
+                    int targetColIndex = startColIndex + j;
+                    
+                    if (targetRowIndex >= ScheduleDataGrid.Items.Count) break;
+                    
+                    var targetColumn = ScheduleDataGrid.Columns.FirstOrDefault(c => c.DisplayIndex == targetColIndex);
+                    if (targetColumn == null) continue;
+                    
+                    var targetItem = ScheduleDataGrid.Items[targetRowIndex];
+                    if (targetItem == null) continue;
+                    
+                    try
+                    {
+                        // Set the cell value using binding if possible
+                        if (targetColumn.ClipboardContentBinding is System.Windows.Data.Binding binding)
+                        {
+                            var propertyName = binding.Path.Path;
+                            var property = targetItem.GetType().GetProperty(propertyName);
+                            
+                            if (property != null && property.CanWrite)
+                            {
+                                // Convert the string value to appropriate type
+                                object convertedValue = ConvertStringToPropertyType(cells[j], property.PropertyType);
+                                property.SetValue(targetItem, convertedValue);
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        DebugLog($"PasteDataToGrid - Error setting cell [{targetRowIndex},{targetColIndex}]: {ex.Message}");
+                    }
+                }
+            }
+            
+            // Refresh the ScheduleDataGrid
+            ScheduleDataGrid.Items.Refresh();
+            DebugLog("PasteDataToGrid - Completed");
+        }
+        
+        private void ClearSelectedCells(ScheduleDataGrid ScheduleDataGrid)
+        {
+            DebugLog("ClearSelectedCells - Starting");
+            
+            var selectedCells = ScheduleDataGrid.SelectedCells.ToList();
+            
+            foreach (var cell in selectedCells)
+            {
+                try
+                {
+                    if (cell.Column.ClipboardContentBinding is System.Windows.Data.Binding binding)
+                    {
+                        var propertyName = binding.Path.Path;
+                        var property = cell.Item.GetType().GetProperty(propertyName);
+                        
+                        if (property != null && property.CanWrite)
+                        {
+                            // Set to default value based on type
+                            object defaultValue = GetDefaultValueForType(property.PropertyType);
+                            property.SetValue(cell.Item, defaultValue);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    DebugLog($"ClearSelectedCells - Error clearing cell: {ex.Message}");
+                }
+            }
+            
+            ScheduleDataGrid.Items.Refresh();
+            DebugLog($"ClearSelectedCells - Cleared {selectedCells.Count} cells");
+        }
+        
+        private object ConvertStringToPropertyType(string value, Type targetType)
+        {
+            if (string.IsNullOrEmpty(value)) return GetDefaultValueForType(targetType);
+            
+            try
+            {
+                if (targetType == typeof(string)) return value;
+                if (targetType == typeof(int) || targetType == typeof(int?)) return int.Parse(value);
+                if (targetType == typeof(double) || targetType == typeof(double?)) return double.Parse(value);
+                if (targetType == typeof(bool) || targetType == typeof(bool?)) return bool.Parse(value);
+                if (targetType == typeof(DateTime) || targetType == typeof(DateTime?)) return DateTime.Parse(value);
+                
+                // Use Convert.ChangeType for other types
+                return Convert.ChangeType(value, targetType);
+            }
+            catch
+            {
+                return GetDefaultValueForType(targetType);
+            }
+        }
+        
+        private object GetDefaultValueForType(Type type)
+        {
+            if (type.IsValueType) return Activator.CreateInstance(type);
+            return null;
+        }
+        
+        private void ShowStatusMessage(string message)
+        {
+            DebugLog($"Status: {message}");
+            // Could show in status bar if available, for now just log
+        }
+
+        // Helper methods for pure CommandBinding approach
+        private string GetCellValueFromBinding(DataGridCellInfo cell)
+        {
+            try
+            {
+                if (cell.Column is DataGridBoundColumn boundColumn && 
+                    boundColumn.Binding is System.Windows.Data.Binding binding)
+                {
+                    var propertyName = binding.Path.Path;
+                    var property = cell.Item.GetType().GetProperty(propertyName);
+                    if (property != null)
+                    {
+                        var value = property.GetValue(cell.Item);
+                        return value?.ToString() ?? "";
+                    }
+                }
+                
+                // Fallback: get from visual content
+                var content = cell.Column.GetCellContent(cell.Item);
+                if (content is TextBlock textBlock)
+                    return textBlock.Text ?? "";
+                    
+                return content?.ToString() ?? "";
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"GetCellValueFromBinding error: {ex.Message}");
+                return "";
+            }
+        }
+        
+        private void SetCellValueViaBinding(object item, DataGridColumn column, string value)
+        {
+            try
+            {
+                if (column is DataGridBoundColumn boundColumn && 
+                    boundColumn.Binding is System.Windows.Data.Binding binding)
+                {
+                    var propertyName = binding.Path.Path;
+                    var property = item.GetType().GetProperty(propertyName);
+                    
+                    if (property != null && property.CanWrite)
+                    {
+                        object convertedValue = ConvertStringToPropertyType(value, property.PropertyType);
+                        property.SetValue(item, convertedValue);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"SetCellValueViaBinding error: {ex.Message}");
+            }
+        }
     }
 }

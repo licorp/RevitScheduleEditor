@@ -470,11 +470,20 @@ namespace RevitScheduleEditor
             await LoadScheduleDataAsync(_loadingCancellationTokenSource.Token);
         }
 
+        private static bool _lastCanExecutePreviewEdit = false;
+        
         private bool CanExecutePreviewEdit(object obj)
         {
             var canExecute = SelectedSchedule != null && !IsLoadingData;
-            var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
-            DebugLog($"[{timestamp}] CanExecutePreviewEdit - SelectedSchedule: {SelectedSchedule?.Name ?? "null"}, IsLoadingData: {IsLoadingData}, Result: {canExecute}");
+            
+            // Only log when state changes to reduce spam
+            if (canExecute != _lastCanExecutePreviewEdit)
+            {
+                var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
+                DebugLog($"[{timestamp}] CanExecutePreviewEdit - SelectedSchedule: {SelectedSchedule?.Name ?? "null"}, IsLoadingData: {IsLoadingData}, Result: {canExecute}");
+                _lastCanExecutePreviewEdit = canExecute;
+            }
+            
             return canExecute;
         }
 
@@ -956,12 +965,18 @@ namespace RevitScheduleEditor
             return cellInfos.All(c => c.Column == firstColumn);
         }
 
+        private static int _lastModifiedCount = -1; // Track last logged count to reduce spam
+        
         private bool CanUpdateModel(object obj) 
         {
             // Check ScheduleData instead of _allScheduleData since that's what's bound to DataGrid
             if (ScheduleData == null)
             {
-                DebugLog("CanUpdateModel: ScheduleData is null");
+                if (_lastModifiedCount != -1)
+                {
+                    DebugLog("CanUpdateModel: ScheduleData is null");
+                    _lastModifiedCount = -1;
+                }
                 return false;
             }
             
@@ -969,16 +984,21 @@ namespace RevitScheduleEditor
             var modifiedRows = allRows.Where(row => row.IsModified).ToList();
             var canUpdate = modifiedRows.Any();
             
-            DebugLog($"CanUpdateModel: Found {modifiedRows.Count} modified rows out of {allRows.Count} total rows, can update: {canUpdate}");
-            
-            // Debug: List first few modified rows for troubleshooting
-            if (modifiedRows.Any())
+            // Only log when modified count changes to reduce log spam
+            if (modifiedRows.Count != _lastModifiedCount)
             {
-                var firstModified = modifiedRows.Take(3);
-                foreach (var row in firstModified)
+                DebugLog($"CanUpdateModel: Found {modifiedRows.Count} modified rows out of {allRows.Count} total rows, can update: {canUpdate}");
+                _lastModifiedCount = modifiedRows.Count;
+                
+                // Debug: List first few modified rows for troubleshooting (only when count changes)
+                if (modifiedRows.Any())
                 {
-                    var modifiedValues = row.GetModifiedValues();
-                    DebugLog($"CanUpdateModel: Modified row {row.Id} has {modifiedValues.Count} changed fields: {string.Join(", ", modifiedValues.Keys)}");
+                    var firstModified = modifiedRows.Take(2); // Reduce to 2 for less spam
+                    foreach (var row in firstModified)
+                    {
+                        var modifiedValues = row.GetModifiedValues();
+                        DebugLog($"CanUpdateModel: Modified row {row.Id} has {modifiedValues.Count} changed fields: {string.Join(", ", modifiedValues.Keys)}");
+                    }
                 }
             }
             
@@ -1087,13 +1107,23 @@ namespace RevitScheduleEditor
         // Copy functionality - Enhanced for better Excel-like experience
         private void ExecuteCopy(object parameter)
         {
+            DebugLog($"ExecuteCopy called with parameter type: {parameter?.GetType()?.Name ?? "null"}");
+            
             var selectedCells = parameter as IList;
-            if (selectedCells == null) return;
+            if (selectedCells == null) 
+            {
+                DebugLog("ExecuteCopy: No selected cells parameter provided");
+                return;
+            }
             
             var cellInfos = selectedCells.Cast<DataGridCellInfo>().ToList();
-            if (cellInfos.Count == 0) return;
+            if (cellInfos.Count == 0) 
+            {
+                DebugLog("ExecuteCopy: No cell infos available");
+                return;
+            }
 
-            DebugLog($"Copy: Processing {cellInfos.Count} selected cells");
+            DebugLog($"ExecuteCopy: Processing {cellInfos.Count} selected cells");
 
             try
             {
@@ -1190,7 +1220,14 @@ namespace RevitScheduleEditor
         {
             var selectedCells = parameter as IList;
             bool canCopy = selectedCells != null && selectedCells.Count > 0;
-            DebugLog($"CanExecuteCopy - Selected cells: {selectedCells?.Count ?? 0}, Can copy: {canCopy}");
+            
+            // Also check if we have any data at all
+            if (!canCopy && ScheduleData != null && ScheduleData.Count > 0)
+            {
+                canCopy = true; // Allow copy even without explicit selection if there's data
+            }
+            
+            DebugLog($"CanExecuteCopy - Selected cells: {selectedCells?.Count ?? 0}, Data rows: {ScheduleData?.Count ?? 0}, Can copy: {canCopy}");
             return canCopy;
         }
 
@@ -1485,6 +1522,64 @@ namespace RevitScheduleEditor
         private bool CanExecuteRedo(object parameter)
         {
             return _redoHistory.Count > 0;
+        }
+
+        public void SelectElementsInRevit(List<ElementId> elementIds)
+        {
+            try
+            {
+                if (_uiApp == null || elementIds == null || elementIds.Count == 0)
+                {
+                    LoadingStatus = "❌ Không thể select elements: Thiếu UI Application hoặc không có elements";
+                    return;
+                }
+
+                // Get the active view
+                var activeView = _doc.ActiveView;
+                if (activeView == null)
+                {
+                    LoadingStatus = "❌ Không có active view trong Revit";
+                    return;
+                }
+
+                // Filter valid element IDs (elements that exist in current document)
+                var validElementIds = new List<ElementId>();
+                foreach (var id in elementIds)
+                {
+                    var element = _doc.GetElement(id);
+                    if (element != null)
+                    {
+                        validElementIds.Add(id);
+                    }
+                }
+
+                if (validElementIds.Count == 0)
+                {
+                    LoadingStatus = "❌ Không tìm thấy elements hợp lệ để select";
+                    return;
+                }
+
+                // Select elements in Revit
+                _uiApp.ActiveUIDocument.Selection.SetElementIds(validElementIds);
+                
+                // Try to zoom to selected elements
+                try
+                {
+                    _uiApp.ActiveUIDocument.ShowElements(validElementIds);
+                }
+                catch (Exception zoomEx)
+                {
+                    // Zoom might fail if elements are not visible in current view, but selection should still work
+                    Debug.WriteLine($"Could not zoom to elements: {zoomEx.Message}");
+                }
+
+                LoadingStatus = $"✅ Đã select {validElementIds.Count} elements trong Revit";
+            }
+            catch (Exception ex)
+            {
+                LoadingStatus = $"❌ Lỗi khi select elements: {ex.Message}";
+                Debug.WriteLine($"SelectElementsInRevit error: {ex.Message}\n{ex.StackTrace}");
+            }
         }
 
         private void RestoreState(Dictionary<string, string> state)
